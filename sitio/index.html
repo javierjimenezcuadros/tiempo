@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>El tiempo</title>
+<script>
+  // Dentro del iframe del shot (o con ?incrustado=1): sin márgenes, a todo el alto.
+  if (window.self !== window.top || new URLSearchParams(location.search).has('incrustado')) {
+    document.documentElement.classList.add('incrustado');
+  }
+</script>
+<link rel="stylesheet" href="tiempo.css">
+</head>
+<body>
+  <div class="escenario">
+    <div class="shot">
+      <main class="modulo" id="modulo" aria-busy="true">
+        <header class="cab">
+          <p class="antetitulo"><b>El tiempo</b> · <span id="dia">cargando…</span><span id="aviso" class="aviso" hidden></span></p>
+          <h1 class="titular" id="titular"></h1>
+        </header>
+
+        <div class="pestanas" role="tablist" aria-label="Qué enseña el mapa">
+          <button role="tab" data-vista="temp" aria-selected="true">Temperatura</button>
+          <button role="tab" data-vista="lluvia" aria-selected="false">Lluvia</button>
+        </div>
+
+        <div class="mapa-hueco"><svg id="mapa" role="img" aria-label="Mapa de España por puntos"></svg></div>
+        <div class="leyenda" id="leyenda"></div>
+
+        <section class="ciudad" aria-live="polite">
+          <div class="buscador">
+            <input id="buscar" type="search" autocomplete="off" spellcheck="false"
+                   placeholder="Busca tu ciudad" aria-label="Busca tu ciudad">
+            <svg class="lupa" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4.5 4.5"/></svg>
+            <ul class="sugerencias" id="sugerencias" role="listbox" hidden></ul>
+          </div>
+          <div class="cajas">
+            <div class="caja"><span class="etq">Máxima</span><span class="valor-grande" id="vmax"></span><span class="nota" id="nmax"></span></div>
+            <div class="caja"><span class="etq">Mínima</span><span class="valor-grande" id="vmin"></span><span class="nota" id="nmin"></span></div>
+          </div>
+          <p class="linea" id="lluvia"></p>
+          <p class="linea seguridad nota" id="seguridad"></p>
+          <ol class="horas" id="horas"></ol>
+        </section>
+
+        <footer class="pie" id="pie"></footer>
+      </main>
+      <p class="fallo" id="fallo" hidden></p>
+    </div>
+  </div>
+<script src="tiempo.js"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+// Worker de archivos estáticos: sirve la carpeta sitio/ en
+// https://tiempo.americaylosovnis.workers.dev. Lo publica GitHub Actions.
+{
+  "name": "tiempo",
+  "account_id": "1b5310d13cf8bfb869f26cfee252ca16",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./sitio"
+  }
+}

@@ -1,0 +1,16 @@
+# Descargas de ECMWF (cientos de MB por pasada; se regeneran)
+cache/
+*.grib2
+*.idx
+*.part
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Cloudflare
+.wrangler/
+node_modules/
+
+.DS_Store

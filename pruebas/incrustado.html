@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prueba de shot — el tiempo</title>
+  <style>
+    /* Simulación aproximada de un shot en la portada de Xataka: columna de 608 px,
+       fondo blanco, firma y texto. Solo para revisar el iframe en local. */
+    body { margin: 0; background: #fff; color: #111; font-family: Georgia, serif; }
+    .barra { background: #111; color: #9f9; font: 700 14px/1 system-ui, sans-serif; padding: 14px 20px; }
+    .barra label { color: #fff; font-weight: 400; margin-left: 1.5rem; }
+    .columna { max-width: 608px; margin: 24px auto; padding: 0 16px; }
+    .firma { font: 600 13px system-ui, sans-serif; color: #555; margin-bottom: 8px; }
+    .columna p { font-size: 17px; line-height: 1.5; }
+    .estrecho .columna { max-width: 375px; }
+    pre { background: #f4f4f4; padding: 12px; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <div class="barra">
+    Prueba de shot · el tiempo
+    <label><input type="checkbox" id="estrecho"> ancho de móvil (375 px)</label>
+  </div>
+  <div class="columna">
+    <div class="firma">Javier Jiménez · 07:00</div>
+    <p><strong>El tiempo de hoy.</strong> Texto del shot de ejemplo, como el que iría encima del módulo.</p>
+    <div id="hueco"></div>
+    <p>Código para pegar en el bloque «Código personalizado» del CMS (sin fecha: enseña siempre el día de hoy):</p>
+    <pre id="codigo"></pre>
+    <p>Con fecha (el shot de ese día se queda con su previsión):</p>
+    <pre id="codigo-fecha"></pre>
+  </div>
+  <script>
+    const p = new URLSearchParams(location.search);
+    const cola = p.get('d') ? `?d=${encodeURIComponent(p.get('d'))}` : '';
+    const iframe = (src) => `<iframe src="${src}" title="El tiempo" width="100%" height="620" style="border:0;display:block;max-width:608px;margin:0 auto;border-radius:12px" loading="lazy"></iframe>`;
+    document.getElementById('hueco').innerHTML = iframe(`${location.origin}/sitio/index.html${cola}`);
+    const web = 'https://tiempo.americaylosovnis.workers.dev/';
+    document.getElementById('codigo').textContent = iframe(web);
+    const hoy = new Date();
+    const f = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`;
+    document.getElementById('codigo-fecha').textContent = iframe(`${web}?d=${f}`);
+    document.getElementById('estrecho').addEventListener('change', (e) => {
+      document.body.classList.toggle('estrecho', e.target.checked);
+    });
+  </script>
+</body>
+</html>

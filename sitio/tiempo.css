@@ -1,0 +1,171 @@
+/* Módulo del tiempo: cabe entero en un iframe de 620 px de alto, de 300 a
+   608 px de ancho. A partir de 520 px, dos columnas (mapa | ciudad); por
+   debajo, una sola. Paleta de los juegos de Quebradero, que es la de diseño
+   de Xataka. */
+
+:root {
+  --papel: #F2F4F6; --carton: #FFFFFF; --tinta: #10161D; --tinta-suave: #5B6570;
+  --acento: #3E8E0F; --acento-texto: #33760C; --linea: #D3D9DF; --tecla: #E1E5EA;
+  --calor: #B82010; --frio: #1A4A90; --lluvia: #2878C0;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body {
+  background: #fff; color: var(--tinta);
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; line-height: 1.35;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Suelto (visitando la página): el módulo al tamaño del shot, centrado. */
+.escenario { display: flex; justify-content: center; padding: 16px; }
+.shot {
+  width: 100%; max-width: 608px; height: 620px; background: var(--papel);
+  border-radius: 12px; overflow: hidden; container-type: inline-size;
+  box-shadow: 0 0 0 1px var(--linea); position: relative;
+}
+/* Dentro del iframe: a todo el ancho y el alto que le den. */
+.incrustado body { background: var(--papel); overflow: hidden; }
+.incrustado .escenario { padding: 0; }
+.incrustado .shot { max-width: none; height: 100vh; border-radius: 0; box-shadow: none; }
+
+.modulo {
+  height: 100%; padding: 12px; display: grid; column-gap: 14px; row-gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "cab" "pest" "mapa" "ley" "ciudad" "pie";
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
+}
+.modulo[aria-busy="true"] .pestanas, .modulo[aria-busy="true"] .ciudad,
+.modulo[aria-busy="true"] .leyenda { visibility: hidden; }
+@container (min-width: 520px) {
+  .modulo {
+    padding: 14px;
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    grid-template-areas: "cab ciudad" "pest ciudad" "mapa ciudad" "ley ciudad" "pie pie";
+    grid-template-rows: auto auto auto auto 1fr;
+    row-gap: 10px;
+  }
+}
+
+.cab { grid-area: cab; }
+.antetitulo {
+  margin: 0; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--tinta-suave);
+}
+.antetitulo b { color: var(--acento-texto); }
+.aviso { color: var(--calor); font-weight: 700; }
+.titular { margin: 0; font-size: 15px; line-height: 1.22; font-weight: 700; display: none; }
+@container (min-width: 520px) {
+  .antetitulo { margin: 0 0 3px; }
+  .titular { display: block; font-size: 18px; }
+}
+
+.pestanas {
+  grid-area: pest; display: flex; gap: 4px; padding: 3px; background: var(--tecla);
+  border-radius: 9px;
+}
+.pestanas button {
+  flex: 1; font: inherit; font-size: 14px; padding: 6px 4px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--tinta-suave); cursor: pointer;
+}
+.pestanas button[aria-selected="true"] {
+  background: var(--carton); color: var(--tinta); font-weight: 700;
+  box-shadow: inset 0 -2px 0 var(--acento);
+}
+
+.mapa-hueco { grid-area: mapa; min-height: 0; display: flex; justify-content: center; }
+#mapa { display: block; width: 100%; height: 100%; max-height: 268px; cursor: pointer; touch-action: manipulation; }
+@container (min-width: 520px) { #mapa { height: auto; max-height: none; } }
+#mapa text {
+  font-size: 15px; font-weight: 700; fill: var(--tinta); paint-order: stroke;
+  stroke: var(--papel); stroke-width: 4px; stroke-linejoin: round; pointer-events: none;
+}
+#mapa text .valor { font-weight: 400; }
+#mapa .recuadro { fill: none; stroke: var(--linea); stroke-width: 1.2; }
+#mapa .anillo { fill: none; stroke: var(--tinta); stroke-width: 2.2; }
+
+.leyenda { grid-area: ley; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--tinta-suave); min-height: 22px; }
+.rampa { flex: 1; position: relative; height: 9px; border-radius: 5px; }
+.rampa span { position: absolute; top: 11px; transform: translateX(-50%); font-size: 10px; }
+.leyenda.temp { padding-bottom: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 3px 10px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; }
+.chip .rango { display: none; }
+@container (min-width: 520px) { .chip .rango { display: inline; } }
+.chip i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+/* La ciudad */
+.ciudad {
+  grid-area: ciudad; background: var(--carton); border-radius: 10px; padding: 10px;
+  display: flex; flex-direction: column; gap: 7px; min-height: 0;
+}
+.buscador { position: relative; }
+.buscador input {
+  width: 100%; font: inherit; font-size: 16px; font-weight: 700; color: var(--tinta);
+  padding: 6px 34px 6px 10px; border: 1px solid var(--linea); border-radius: 8px;
+  background: var(--papel); -webkit-appearance: none; appearance: none;
+}
+.buscador input::-webkit-search-cancel-button { display: none; }
+.buscador input:focus { outline: 2px solid var(--acento); outline-offset: -1px; background: var(--carton); }
+.lupa {
+  position: absolute; right: 9px; top: 50%; width: 18px; height: 18px; transform: translateY(-50%);
+  fill: none; stroke: var(--tinta-suave); stroke-width: 2; stroke-linecap: round; pointer-events: none;
+}
+.sugerencias {
+  position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 5; margin: 0; padding: 4px 0;
+  list-style: none; background: var(--carton); border: 1px solid var(--linea); border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(16, 22, 29, 0.12); max-height: 220px; overflow-y: auto;
+}
+.sugerencias li { padding: 6px 10px; font-size: 14px; cursor: pointer; }
+.sugerencias li:hover, .sugerencias li.activa { background: var(--papel); }
+.sugerencias li.vacio { color: var(--tinta-suave); cursor: default; }
+
+.cajas { display: flex; gap: 8px; }
+.caja {
+  flex: 1; display: flex; flex-direction: column; padding: 6px 8px;
+  border: 1px solid var(--linea); border-radius: 8px;
+}
+.etq { font-size: 11px; color: var(--tinta-suave); text-transform: uppercase; letter-spacing: 0.05em; }
+.valor-grande { font-size: 24px; font-weight: 700; line-height: 1.05; }
+@container (min-width: 520px) { .valor-grande { font-size: 28px; } }
+.nota { font-size: 11px; color: var(--tinta-suave); line-height: 1.2; }
+.nota.calor { color: var(--calor); }
+.nota.frio { color: var(--frio); }
+.linea { margin: 0; font-size: 12px; }
+.seguridad { display: none; }
+@container (min-width: 520px) { .seguridad { display: block; } }
+.seguridad i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; background: var(--acento); }
+.seguridad i.media { background: #D99A1B; }
+.seguridad i.baja { background: var(--calor); }
+
+/* Tabla hora · temperatura · probabilidad de lluvia. A lo ancho, en filas;
+   en el móvil, en columnas (una por franja de 3 horas). */
+.horas { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: auto repeat(8, 1fr); text-align: center; }
+.horas li { display: flex; flex-direction: column; gap: 1px; font-size: 12px; }
+.horas li.cabecera { text-align: left; color: var(--tinta-suave); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; padding-right: 4px; }
+.horas li span { line-height: 18px; }
+.horas .t { font-weight: 700; font-size: 14px; }
+.horas .p { color: var(--lluvia); font-weight: 700; font-size: 11px; }
+.horas .p.nada { color: #B9C1C9; font-weight: 400; }
+.horas .barra-p { display: none; }
+@container (min-width: 520px) {
+  .horas { grid-template-columns: 1fr; text-align: left; }
+  .horas li {
+    display: grid; grid-template-columns: 40px 44px 1fr 38px; align-items: center;
+    gap: 6px; padding: 2px 0; border-top: 1px solid var(--papel);
+  }
+  .horas li.cabecera { border-top: 0; padding-right: 0; }
+  .horas li.cabecera span:nth-child(3) { grid-column: 3 / 5; }
+  .horas li span { line-height: 22px; }
+  .horas .barra-p { display: block; height: 7px; border-radius: 4px; background: var(--tecla); position: relative; overflow: hidden; }
+  .horas .barra-p b { position: absolute; inset: 0 auto 0 0; background: var(--lluvia); border-radius: 4px; }
+  .horas .p { text-align: right; }
+}
+
+.pie { grid-area: pie; font-size: 10px; color: var(--tinta-suave); align-self: end; }
+.pie a { color: var(--acento-texto); font-weight: 700; }
+
+.fallo {
+  position: absolute; inset: 0; margin: 0; display: flex; align-items: center; justify-content: center;
+  padding: 24px; text-align: center; color: var(--tinta-suave); font-size: 14px; background: var(--papel);
+}
