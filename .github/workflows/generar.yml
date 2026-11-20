@@ -80,7 +80,7 @@ jobs:
         if: ${{ !inputs.solo_publicar }}
         run: pip install -r requirements.txt
 
-      - name: Generar hoy y mañana
+      - name: Generar la previsión de seis días
         if: ${{ !inputs.solo_publicar }}
         run: python -m generador
 
