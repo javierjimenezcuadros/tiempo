@@ -26,7 +26,8 @@ ECMWF Open Data ──► GitHub Actions (2 veces al día) ──► sitio/datos
   ECMWF ya ha publicado la pasada de las 00 y la de las 12. Genera hoy y mañana,
   guarda los JSON en el repositorio (así queda el archivo) y publica en
   Cloudflare. También se lanza a mano: pestaña *Actions* → *Generar el tiempo*
-  → *Run workflow*.
+  → *Run workflow*. Marcando «Solo publicar la web» no genera datos: sube la
+  página tal como está en el repositorio (para cambios de diseño, en un minuto).
 - El shot de primera hora sale con la pasada de la noche anterior; a media
   mañana se actualiza con la de las 00.
 
