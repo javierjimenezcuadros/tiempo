@@ -46,11 +46,21 @@ jobs:
           elif [[ ! "$LIMPIO" =~ ^[A-Za-z0-9_-]{30,80}$ ]]; then
             echo "::error::El secreto no tiene forma de token ($N caracteres, con símbolos raros)."; exit 1
           fi
-          R=$(curl -s -H "Authorization: Bearer $LIMPIO" https://api.cloudflare.com/client/v4/user/tokens/verify)
-          if ! printf '%s' "$R" | grep -q '"status":"active"'; then
-            echo "::error::Cloudflare no da el token por bueno ($N caracteres): $(printf '%s' "$R" | grep -oE '"message":"[^"]*"' | head -2 | tr '\n' ' ')"; exit 1
+          # Hay dos clases de token: personales (My Profile → API Tokens) y de
+          # cuenta (Manage Account → Account API Tokens). Cada uno se verifica
+          # en su sitio; cualquiera de los dos vale para publicar.
+          CUENTA=$(grep -oE '"account_id": *"[0-9a-f]+"' wrangler.jsonc 2>/dev/null | grep -oE '[0-9a-f]{32}' || true)
+          CUENTA=${CUENTA:-1b5310d13cf8bfb869f26cfee252ca16}
+          RU=$(curl -s -H "Authorization: Bearer $LIMPIO" https://api.cloudflare.com/client/v4/user/tokens/verify)
+          RC=$(curl -s -H "Authorization: Bearer $LIMPIO" "https://api.cloudflare.com/client/v4/accounts/$CUENTA/tokens/verify")
+          if printf '%s' "$RU" | grep -q '"status":"active"'; then
+            echo "Token personal de Cloudflare válido y activo ($N caracteres)."
+          elif printf '%s' "$RC" | grep -q '"status":"active"'; then
+            echo "Token de cuenta de Cloudflare válido y activo ($N caracteres)."
+          else
+            msg() { printf '%s' "$1" | grep -oE '"message":"[^"]*"' | head -2 | tr '\n' ' '; }
+            echo "::error::Cloudflare no da el token por bueno ($N caracteres). Como personal: $(msg "$RU") Como de cuenta: $(msg "$RC")"; exit 1
           fi
-          echo "Token de Cloudflare válido y activo ($N caracteres)."
           echo "CLOUDFLARE_LIMPIO=$LIMPIO" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v4
