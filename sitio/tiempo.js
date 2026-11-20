@@ -4,10 +4,15 @@
    Dirección:
      /                 el día de hoy (o el más cercano que haya)
      /?d=2026-11-21    ese día, para siempre (el shot de ese día hace de archivo)
-     &ciudad=Sevilla   ciudad con la que abre (por defecto, Madrid)
+     &ciudad=Sevilla   ciudad con la que abre
      &vista=lluvia     pestaña con la que abre
 
-   No guarda nada en el navegador ni envía nada. */
+   Sin &ciudad, abre en la última ciudad que eligió el lector en ese navegador;
+   si no hay, en Las Palmas cuando su hora es la de Canarias, y si no, en Madrid.
+
+   Lo único que guarda es el nombre de esa ciudad (localStorage, clave
+   tiempo.ciudad), y solo cuando el lector la elige. No envía nada. Si cambia lo
+   que guarda o envía, hay que cambiar también privacidad.html. */
 (() => {
   'use strict';
 
@@ -207,11 +212,36 @@
     }).join('');
   }
 
+  /** Elección del lector (buscador o mapa): se recuerda para la próxima vez. */
   function elegir(nombre) {
     if (!D.ciudades[nombre]) return;
     ciudad = nombre;
+    recordar(nombre);
     panel();
     pintar();
+  }
+
+  // --- Ciudad recordada y zona horaria -------------------------------------
+  // En un iframe de otro sitio el almacenamiento puede estar bloqueado o
+  // borrarse (Safari lo limita): nada de esto puede romper el módulo.
+  const CLAVE = 'tiempo.ciudad';
+  function recordada() {
+    try { return localStorage.getItem(CLAVE); } catch (e) { return null; }
+  }
+  function recordar(nombre) {
+    try { localStorage.setItem(CLAVE, nombre); } catch (e) { /* sin almacenamiento */ }
+  }
+  function horaDeCanarias() {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone === 'Atlantic/Canary'; } catch (e) { return false; }
+  }
+
+  /** Ciudad con la que abre: la de la dirección, la recordada, Las Palmas o Madrid. */
+  function ciudadInicial() {
+    const existe = (n) => n && nombres.find((x) => llano(x) === llano(n));
+    return existe(params.get('ciudad'))
+      || existe(recordada())
+      || (horaDeCanarias() && D.ciudades['Las Palmas'] ? 'Las Palmas' : null)
+      || (D.ciudades.Madrid ? 'Madrid' : nombres[0]);
   }
 
   // --- Buscador --------------------------------------------------------
@@ -272,9 +302,7 @@
       return;
     }
     nombres = Object.keys(D.ciudades).sort((a, b) => a.localeCompare(b, 'es'));
-    const pedida = params.get('ciudad');
-    const encontrada = pedida && nombres.find((n) => llano(n) === llano(pedida));
-    ciudad = encontrada || (D.ciudades.Madrid ? 'Madrid' : nombres[0]);
+    ciudad = ciudadInicial();
 
     $('dia').textContent = D.dia;
     $('titular').textContent = D.titular;
@@ -286,6 +314,12 @@
       a.textContent = D.enlace.texto || 'Lee la historia';
       $('pie').append(' · ', a);
     }
+    const priv = document.createElement('a');
+    priv.href = 'privacidad.html';
+    priv.target = '_blank';          // nunca saca al lector de la portada de Xataka
+    priv.rel = 'noopener';
+    priv.textContent = 'Privacidad';
+    $('pie').append(' · ', priv);
     document.querySelectorAll('.pestanas button').forEach((b) => {
       b.setAttribute('aria-selected', String(b.dataset.vista === vista));
       b.addEventListener('click', () => {

@@ -88,4 +88,19 @@ Con `?d=AAAA-MM-DD` el shot se queda con la previsión de ese día. Con
 lluvia. La versión AMP del shot no ejecuta iframes: necesita una imagen y un
 enlace de respaldo (pendiente).
 
-La página no guarda nada en el navegador ni envía nada.
+## Con qué ciudad abre
+
+Sin `&ciudad`, con la última que eligió el lector en ese navegador; si no hay
+ninguna, con Las Palmas cuando la hora del navegador es la de Canarias, y si
+no, con Madrid. No se pide la ubicación (se descartó un botón «Usar mi
+ubicación» de momento: necesitaría `allow="geolocation"` en el iframe y que
+portada lo acepte, porque Chrome muestra el aviso como si lo pidiera
+xataka.com).
+
+## Privacidad
+
+Lo único que se guarda es el nombre de la ciudad elegida (localStorage,
+clave `tiempo.ciudad`), y solo cuando el lector la elige. No hay cookies,
+medición ni recursos de terceros. Está contado en `sitio/privacidad.html`,
+enlazada en el pie del módulo: si cambia lo que la página guarda o envía, hay
+que cambiarla también.

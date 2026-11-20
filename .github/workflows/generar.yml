@@ -27,6 +27,32 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # Antes que nada (tarda segundos): que el secreto sea un token de Cloudflare
+      # válido. Dice qué parece sin enseñarlo y quita espacios o saltos de línea
+      # que se cuelen al pegarlo.
+      - name: Comprobar el token de Cloudflare
+        env:
+          T: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          LIMPIO=$(printf '%s' "$T" | tr -d '[:space:]')
+          echo "::add-mask::$LIMPIO"
+          N=${#LIMPIO}
+          if [ "$N" -eq 0 ]; then
+            echo "::error::El secreto CLOUDFLARE_API_TOKEN está vacío o no existe."; exit 1
+          elif printf '%s' "$T" | grep -qiE 'curl|bearer|authorization'; then
+            echo "::error::El secreto lleva el comando de prueba (curl/Bearer), no solo el token."; exit 1
+          elif [[ "$LIMPIO" =~ ^[0-9a-f]{37}$ ]]; then
+            echo "::error::El secreto parece la Global API Key (37 caracteres), no un token de API."; exit 1
+          elif [[ ! "$LIMPIO" =~ ^[A-Za-z0-9_-]{30,80}$ ]]; then
+            echo "::error::El secreto no tiene forma de token ($N caracteres, con símbolos raros)."; exit 1
+          fi
+          R=$(curl -s -H "Authorization: Bearer $LIMPIO" https://api.cloudflare.com/client/v4/user/tokens/verify)
+          if ! printf '%s' "$R" | grep -q '"status":"active"'; then
+            echo "::error::Cloudflare no da el token por bueno ($N caracteres): $(printf '%s' "$R" | grep -oE '"message":"[^"]*"' | head -2 | tr '\n' ' ')"; exit 1
+          fi
+          echo "Token de Cloudflare válido y activo ($N caracteres)."
+          echo "CLOUDFLARE_LIMPIO=$LIMPIO" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
@@ -53,6 +79,6 @@ jobs:
       - name: Publicar en Cloudflare
         uses: cloudflare/wrangler-action@v3
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          apiToken: ${{ env.CLOUDFLARE_LIMPIO }}
           wranglerVersion: "4"
           command: deploy
