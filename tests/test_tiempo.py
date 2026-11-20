@@ -159,23 +159,27 @@ def test_titular_canarias_no_firma_la_maxima():
 
 # --- Documento ---------------------------------------------------------------
 
-def test_documento_completo_sin_red():
-    ciudades = [
-        {"nombre": "Madrid", "lat": 40.42, "lon": -3.7, "nodo": [40.5, -3.75], "correccion": 0.2,
-         "normal_max": [14.0] * 366, "normal_min": [5.0] * 366},
-        {"nombre": "Las Palmas", "lat": 28.12, "lon": -15.43, "nodo": [28.0, -15.75],
-         "correccion": 1.5, "normal_max": None, "normal_min": None},
-    ]
-    prev = t.Prevision(
-        run=datetime(2026, 11, 20, 0), horas=[1, 4],
+CIUDADES_PRUEBA = [
+    {"nombre": "Madrid", "lat": 40.42, "lon": -3.7, "nodo": [40.5, -3.75], "correccion": 0.2,
+     "normal_max": [14.0] * 366, "normal_min": [5.0] * 366},
+    {"nombre": "Las Palmas", "lat": 28.12, "lon": -15.43, "nodo": [28.0, -15.75],
+     "correccion": 1.5, "normal_max": None, "normal_min": None},
+]
+
+
+def _prevision(run=datetime(2026, 11, 20, 0)):
+    return t.Prevision(
+        run=run, horas=[1, 4],
         puntos={"max": np.array([12.6, 20.1]), "min": np.array([5.0, 10.0]), "lluvia": np.array([0.04, 3.333])},
         ciudades={"max": np.array([12.8, 23.9]), "min": np.array([7.8, 19.5]), "lluvia": np.array([5.0, 0.0])},
         horas_t=np.array([[9.0, 20.0], [9.0, 20.0]]),
         horas_mm=np.array([[np.nan, np.nan], [0.1, 0.0]]),
     )
-    doc = t.documento(date(2026, 11, 21), prev, None, ciudades)
-    assert doc["dia"] == "sábado 21 de noviembre"
-    assert doc["pasada_texto"] == "00 UTC del 20/11"
+
+
+def test_documento_dia_sin_red():
+    doc = t.documento_dia(date(2026, 11, 21), _prevision(), None, CIUDADES_PRUEBA)
+    assert (doc["dia"], doc["corto"]) == ("sábado 21 de noviembre", "sáb 21")
     assert doc["puntos"] == {"max": [13, 20], "min": [5, 10], "lluvia": [0.0, 3.3]}
     madrid = doc["ciudades"]["Madrid"]
     assert (madrid["max"], madrid["max_dif"]) == (13, -1)
@@ -183,6 +187,36 @@ def test_documento_completo_sin_red():
     assert doc["ciudades"]["Las Palmas"]["max"] == 25     # 23,9 + 1,5
     assert doc["ciudades"]["Las Palmas"]["max_dif"] is None
     assert doc["con_ensemble"] is False
+
+
+def test_emision_de_seis_dias_sin_red(tmp_path, monkeypatch):
+    monkeypatch.setattr(t, "cargar_tablas", lambda: (CIUDADES_PRUEBA, [[40.5, -3.75], [28.0, -15.75]]))
+    pedidos = []
+    monkeypatch.setattr(t, "determinista", lambda run, d, c, n: pedidos.append(d) or _prevision(run))
+    monkeypatch.setattr(t, "ensemble", lambda run, d, n: None)
+    ruta = t.generar_emision(date(2026, 11, 20), datetime(2026, 11, 20, 0), salida=tmp_path)
+    import json
+    doc = json.loads(ruta.read_text(encoding="utf-8"))
+    assert ruta.name == "2026-11-20.json" and doc["version"] == 2
+    assert [d["fecha"] for d in doc["dias"]] == [f"2026-11-{n}" for n in range(20, 26)]
+    assert doc["pasada_texto"] == "00 UTC del 20/11"
+    # La de las 12 da un día menos: el sexto acabaría pasado el paso 144.
+    ruta = t.generar_emision(date(2026, 11, 21), datetime(2026, 11, 20, 12), salida=tmp_path)
+    assert len(json.loads(ruta.read_text(encoding="utf-8"))["dias"]) == 5
+
+
+def test_ensemble_solo_tarde_y_madrugada():
+    v = t.ventana(datetime(2026, 11, 20, 0), date(2026, 11, 21))
+    # Tramos de 3 h que acaban en esos pasos; punto medio en hora peninsular (UTC+1).
+    assert v.ens_max == [36, 39, 42]          # 11:30, 14:30 y 17:30
+    assert v.ens_min == [27, 30, 33]          # 2:30, 5:30 y 8:30
+    assert set(v.ens_max) | set(v.ens_min) <= set(v.extremos)
+
+
+def test_primer_dia_de_cada_ejecucion():
+    # Por la mañana (pasada de las 00), hoy; por la noche (la de las 12), mañana.
+    assert t.primer_dia(datetime(2026, 11, 20, 9, 20)) == date(2026, 11, 20)
+    assert t.primer_dia(datetime(2026, 11, 20, 21, 20)) == date(2026, 11, 21)
 
 
 def test_tablas_del_repositorio_coinciden():

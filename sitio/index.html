@@ -43,7 +43,12 @@
           </div>
           <p class="linea" id="lluvia"></p>
           <p class="linea seguridad nota" id="seguridad"></p>
+          <div class="ficha-vista" role="tablist" aria-label="Qué enseña la ficha">
+            <button role="tab" data-ficha="horas" aria-selected="true">Por horas</button>
+            <button role="tab" data-ficha="dias" aria-selected="false" id="boton-dias">6 días</button>
+          </div>
           <ol class="horas" id="horas"></ol>
+          <ol class="dias" id="dias" hidden></ol>
         </section>
 
         <footer class="pie" id="pie"></footer>

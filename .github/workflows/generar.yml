@@ -30,7 +30,7 @@ concurrency:
 jobs:
   generar:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45          # seis días: ~1,4 GB de ECMWF por ejecución
     steps:
       # Antes que nada (tarda segundos): que el secreto sea un token de Cloudflare
       # válido. Dice qué parece sin enseñarlo y quita espacios o saltos de línea

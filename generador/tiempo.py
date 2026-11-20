@@ -1,9 +1,14 @@
 """Generador del módulo del tiempo para un shot de la portada de Xataka.
 
-Escribe, para cada día, un JSON en sitio/datos/ que la página (sitio/index.html)
-pinta dentro de un iframe de 620 px de alto: un mapa de España por puntos (uno
-por celda del modelo) con la máxima, la mínima y la lluvia, y la ficha de cada
-ciudad con su previsión cada 3 horas.
+Escribe en sitio/datos/ una «emisión» por día: un JSON con la previsión de ese
+día y los cinco siguientes (DIAS_EMISION), tal como se da ese día. La página
+(sitio/index.html) la pinta dentro de un iframe de 620 px de alto: un mapa de
+España por puntos (uno por celda del modelo) con la máxima, la mínima y la
+lluvia, y la ficha de cada ciudad con su previsión cada 3 horas y la de los
+próximos días. El shot de cada fecha se queda así con su previsión.
+
+Seis días y no siete: hasta el paso 144 ECMWF Open Data da datos cada 3 horas
+y todos los días tienen la misma tabla; el séptimo caería ya en pasos de 6.
 
 De dónde sale cada cifra (ECMWF Open Data, licencia CC BY 4.0):
   - Máxima, mínima y lluvia del día: IFS determinista, con mx2t3/mn2t3, que no
@@ -12,7 +17,9 @@ De dónde sale cada cifra (ECMWF Open Data, licencia CC BY 4.0):
     Data no da pasos de una hora.
   - Probabilidad de lluvia y seguridad: los 50 escenarios del ensemble de la
     MISMA pasada. La horquilla se centra en el valor determinista para que el
-    mapa y la ficha digan la misma cifra; el ensemble pone la anchura.
+    mapa y la ficha digan la misma cifra; el ensemble pone la anchura. Para no
+    descargar 2,5 GB por ejecución, del ensemble solo se piden los tramos de la
+    tarde (máxima) y de la madrugada (mínima), que es donde caen casi siempre.
   - Lo normal: ERA5 1991-2020 (Copernicus), precalculado por ciudad y día del
     año en datos_fijos/ciudades.json (ver herramientas/preparar_tablas.py).
 
@@ -41,7 +48,8 @@ DATOS = SITIO / "datos"
 FIJOS = RAIZ / "datos_fijos"
 CACHE = Path(os.environ.get("TIEMPO_CACHE", RAIZ / "cache"))
 TZ = ZoneInfo("Europe/Madrid")
-VERSION = 1
+VERSION = 2
+DIAS_EMISION = 6       # hoy y cinco más
 
 # Región que se lee de cada GRIB: Península, Baleares, Canarias, Ceuta y Melilla.
 LAT_N, LAT_S = 44.6, 27.3
@@ -88,6 +96,8 @@ class Ventana:
     """Pasos del modelo que cubren un día peninsular."""
     instantes: list[int]    # 2t cada 3 h dentro del día
     extremos: list[int]     # tramos de mx2t3/mn2t3 cuyo punto medio cae en el día
+    ens_max: list[int]      # de esos, los de la tarde (punto medio de 10 a 20 h)
+    ens_min: list[int]      # y los de la madrugada (punto medio antes de las 10 h)
     tp: list[int]           # pasos de tp necesarios (acumulado desde el inicio)
     tp_ini: int             # inicio y fin del acumulado del día
     tp_fin: int
@@ -107,17 +117,25 @@ def ventana(run: datetime, dia: date) -> Ventana:
     pasos = list(range(0, PASO_MAX + 1, 3))
     instantes = [s for s in pasos if h0 <= s < h1]
     extremos = [s for s in pasos if s > 0 and h0 <= s - 1.5 < h1]
+    medio = {s: hora_local(run + timedelta(hours=s - 1.5)) for s in extremos}
+    ens_max = [s for s in extremos if 10 <= medio[s] < 20] or extremos
+    ens_min = [s for s in extremos if medio[s] < 10] or extremos
     tp_ini = min(pasos, key=lambda s: abs(s - h0))
     tp_fin = min(pasos, key=lambda s: abs(s - h1))
     tp = sorted({tp_ini, tp_fin, *instantes, *(s - 3 for s in instantes if s >= 3)})
-    return Ventana(instantes, extremos, tp, tp_ini, tp_fin)
+    return Ventana(instantes, extremos, ens_max, ens_min, tp, tp_ini, tp_fin)
+
+
+def ultima_pasada(ahora: datetime | None = None) -> datetime:
+    """La pasada 00/12 UTC más reciente en teoría (puede no estar publicada aún)."""
+    ahora = ahora or datetime.utcnow()
+    base = ahora.replace(minute=0, second=0, microsecond=0)
+    return base.replace(hour=12 if base.hour >= 12 else 0)
 
 
 def pasadas_candidatas(dia: date, ahora: datetime | None = None) -> list[datetime]:
     """Pasadas 00/12 UTC que cubren el día, de la más reciente a la más antigua."""
-    ahora = ahora or datetime.utcnow()
-    base = ahora.replace(minute=0, second=0, microsecond=0)
-    base = base.replace(hour=12 if base.hour >= 12 else 0)
+    base = ultima_pasada(ahora)
     out = []
     for k in range(6):
         run = base - timedelta(hours=12 * k)
@@ -262,15 +280,20 @@ class Prevision:
     horas_mm: np.ndarray        # (n_instantes, n_ciudades); NaN si no se sabe
 
 
+def _gr(run: datetime, tipo: str, param: str, pasos: list[int], var: str):
+    """Descarga (o reutiliza) y lee `param` en esos pasos; el nombre lleva los pasos."""
+    nombre = f"{tipo}_{param}_{pasos[0]:03d}-{pasos[-1]:03d}-n{len(pasos)}"
+    return leer(bajar(run, nombre, type=tipo, param=param, step=pasos), var)
+
+
 def determinista(run: datetime, dia: date, celdas: list, nodos: list) -> Prevision:
     """Lee el IFS determinista y lo extrae en los puntos del mapa y las ciudades."""
     v = ventana(run, dia)
-    tag = f"{dia:%Y%m%d}"
-    vx, _, lats, lons = leer(bajar(run, f"fc_mx2t3_{tag}", type="fc", param="mx2t3", step=v.extremos), "mx2t3")
-    vn, _, _, _ = leer(bajar(run, f"fc_mn2t3_{tag}", type="fc", param="mn2t3", step=v.extremos), "mn2t3")
+    vx, _, lats, lons = _gr(run, "fc", "mx2t3", v.extremos, "mx2t3")
+    vn, _, _, _ = _gr(run, "fc", "mn2t3", v.extremos, "mn2t3")
     pasos_tp = [s for s in v.tp if s > 0]
-    vtp, ptp, _, _ = leer(bajar(run, f"fc_tp_{tag}", type="fc", param="tp", step=pasos_tp), "tp")
-    v2t, _, _, _ = leer(bajar(run, f"fc_2t_{tag}", type="fc", param="2t", step=v.instantes), "t2m")
+    vtp, ptp, _, _ = _gr(run, "fc", "tp", pasos_tp, "tp")
+    v2t, _, _, _ = _gr(run, "fc", "2t", v.instantes, "t2m")
 
     ip, jp = indices(lats, lons, celdas)
     ic, jc = indices(lats, lons, nodos)
@@ -304,12 +327,11 @@ def ensemble(run: datetime, dia: date, nodos: list) -> dict | None:
         no está (el módulo sale entonces sin seguridad ni probabilidades).
     """
     v = ventana(run, dia)
-    tag = f"{dia:%Y%m%d}"
     pasos_tp = [s for s in v.tp if s > 0]
     try:
-        ex, _, lats, lons = leer(bajar(run, f"pf_mx2t3_{tag}", type="pf", param="mx2t3", step=v.extremos), "mx2t3")
-        en, _, _, _ = leer(bajar(run, f"pf_mn2t3_{tag}", type="pf", param="mn2t3", step=v.extremos), "mn2t3")
-        etp, ptp, _, _ = leer(bajar(run, f"pf_tp_{tag}", type="pf", param="tp", step=pasos_tp), "tp")
+        ex, _, lats, lons = _gr(run, "pf", "mx2t3", v.ens_max, "mx2t3")
+        en, _, _, _ = _gr(run, "pf", "mn2t3", v.ens_min, "mn2t3")
+        etp, ptp, _, _ = _gr(run, "pf", "tp", pasos_tp, "tp")
     except Exception as e:     # noqa: BLE001
         logger.warning(f"Sin ensemble ({e}): saldrá sin seguridad ni probabilidad de lluvia")
         return None
@@ -445,7 +467,7 @@ def titular(fichas: dict[str, dict], valores: dict[str, dict], canarias: set[str
 
 
 # ---------------------------------------------------------------------------
-# Documento del día
+# Documento de cada día y emisión
 # ---------------------------------------------------------------------------
 
 def cargar_tablas() -> tuple[list[dict], list]:
@@ -455,8 +477,11 @@ def cargar_tablas() -> tuple[list[dict], list]:
     return ciudades, celdas
 
 
-def documento(dia: date, prev: Prevision, ens: dict | None, ciudades: list[dict]) -> dict:
-    """El JSON del día a partir de la previsión ya extraída (sin red ni disco)."""
+_DIAS_CORTOS = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"]
+
+
+def documento_dia(dia: date, prev: Prevision, ens: dict | None, ciudades: list[dict]) -> dict:
+    """La previsión de un día a partir de la ya extraída (sin red ni disco)."""
     doy = dia_del_ano(dia)
     fichas, valores, canarias = {}, {}, set()
     for k, c in enumerate(ciudades):
@@ -480,15 +505,11 @@ def documento(dia: date, prev: Prevision, ens: dict | None, ciudades: list[dict]
         valores[nombre] = {"max": tmax, "min": tmin, "lluvia": lluvia,
                            "max_dif": None if normal is None else tmax - normal[0],
                            "min_dif": None if normal is None else tmin - normal[1]}
-    run = prev.run
     return {
-        "version": VERSION,
         "fecha": dia.isoformat(),
         "dia": dia_texto(dia),
+        "corto": f"{_DIAS_CORTOS[dia.weekday()]} {dia.day}",
         "titular": titular(fichas, valores, canarias),
-        "pasada": run.strftime("%Y-%m-%dT%H:00Z"),
-        "pasada_texto": f"{run.hour:02d} UTC del {run.day}/{run.month}",
-        "generado": datetime.now(TZ).isoformat(timespec="minutes"),
         "con_ensemble": ens is not None,
         "puntos": {
             "max": [int(round(x)) for x in prev.puntos["max"]],
@@ -496,34 +517,65 @@ def documento(dia: date, prev: Prevision, ens: dict | None, ciudades: list[dict]
             "lluvia": [round(float(x), 1) for x in prev.puntos["lluvia"]],
         },
         "ciudades": fichas,
+    }
+
+
+def emision(primer: date, run: datetime, dias: list[dict]) -> dict:
+    """El JSON de una emisión: el día del shot y los siguientes, de una misma pasada."""
+    return {
+        "version": VERSION,
+        "fecha": primer.isoformat(),
+        "pasada": run.strftime("%Y-%m-%dT%H:00Z"),
+        "pasada_texto": f"{run.hour:02d} UTC del {run.day}/{run.month}",
+        "generado": datetime.now(TZ).isoformat(timespec="minutes"),
+        "dias": dias,
         "enlace": None,
     }
 
 
-def generar_dia(dia: date, pasada: datetime | None = None, salida: Path = DATOS,
-                con_ensemble: bool = True) -> Path:
-    """Descarga, calcula y escribe el JSON de `dia`. Devuelve su ruta."""
+def generar_emision(primer: date, pasada: datetime | None = None, salida: Path = DATOS,
+                    con_ensemble: bool = True, n_dias: int = DIAS_EMISION) -> Path:
+    """Descarga, calcula y escribe la emisión que empieza en `primer`. Devuelve su ruta.
+
+    Usa la pasada más reciente que cubra `primer` y llega hasta donde esa pasada
+    dé datos cada 3 h (seis días con la de las 00, cinco con la de las 12).
+    """
     ciudades, celdas = cargar_tablas()
     nodos = [c["nodo"] for c in ciudades]
-    candidatas = [pasada] if pasada else pasadas_candidatas(dia)
+    candidatas = [pasada] if pasada else pasadas_candidatas(primer)
     if not candidatas:
-        raise ValueError(f"Ninguna pasada cubre el {dia:%d/%m/%Y}.")
+        raise ValueError(f"Ninguna pasada cubre el {primer:%d/%m/%Y}.")
     error = None
     for run in candidatas:
         try:
-            prev = determinista(run, dia, celdas, nodos)
+            primera = determinista(run, primer, celdas, nodos)
             break
         except Exception as e:     # noqa: BLE001 — pasada aún no publicada: la anterior
             logger.warning(f"Pasada {run:%d/%m %H} UTC no disponible: {e}")
             error = e
     else:
-        raise RuntimeError(f"No hay ninguna pasada disponible para el {dia:%d/%m}: {error}")
-    ens = ensemble(prev.run, dia, nodos) if con_ensemble else None
-    doc = documento(dia, prev, ens, ciudades)
+        raise RuntimeError(f"No hay ninguna pasada disponible para el {primer:%d/%m}: {error}")
+
+    dias = []
+    for k in range(n_dias):
+        d = primer + timedelta(days=k)
+        try:
+            ventana(run, d)
+        except ValueError:
+            break                  # más allá del paso 144
+        try:
+            prev = primera if k == 0 else determinista(run, d, celdas, nodos)
+        except Exception as e:     # noqa: BLE001 — se publica lo que haya
+            logger.warning(f"{d}: sin datos ({e}); la emisión acaba en el día anterior")
+            break
+        ens = ensemble(run, d, nodos) if con_ensemble else None
+        dias.append(documento_dia(d, prev, ens, ciudades))
+        logger.info(f"  {d}: {dias[-1]['titular']}")
+    doc = emision(primer, run, dias)
     salida.mkdir(parents=True, exist_ok=True)
-    destino = salida / f"{dia:%Y-%m-%d}.json"
+    destino = salida / f"{primer:%Y-%m-%d}.json"
     destino.write_text(json.dumps(doc, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    logger.info(f"{destino.name}: {doc['titular']} (pasada {doc['pasada_texto']})")
+    logger.info(f"{destino.name}: {len(dias)} días (pasada {doc['pasada_texto']})")
     return destino
 
 
@@ -545,7 +597,7 @@ def escribir_indice(salida: Path = DATOS) -> Path:
 
 
 def limpiar_cache(dias: int = 3) -> None:
-    """Borra las descargas de pasadas de hace más de `dias` días (~450 MB cada una)."""
+    """Borra las descargas de pasadas de hace más de `dias` días (~1,5 GB cada una)."""
     if not CACHE.exists():
         return
     limite = datetime.utcnow() - timedelta(days=dias)
@@ -557,22 +609,30 @@ def limpiar_cache(dias: int = 3) -> None:
             continue
 
 
-def generar(dias: list[date] | None = None, pasada: datetime | None = None,
-            con_ensemble: bool = True) -> list[Path]:
-    """Genera los días pedidos (por defecto, hoy y mañana) que alguna pasada cubra.
+def primer_dia(ahora: datetime | None = None) -> date:
+    """Con qué día empieza la emisión de esta ejecución.
 
-    Hoy solo se rehace con la pasada de las 00 UTC: la de las 12 UTC empieza a
-    media tarde y ya no cubre el día entero, así que el de la mañana se queda.
+    Con la pasada de las 00 UTC (la de la mañana), hoy. La de las 12 UTC empieza
+    a media tarde y ya no cubre el día entero: su emisión empieza mañana, y la
+    de hoy se queda como la dejó la de la mañana.
     """
-    hoy = datetime.now(TZ).date()
-    dias = dias or [hoy, hoy + timedelta(days=1)]
+    ahora = ahora or datetime.utcnow()
+    hoy = ahora.replace(tzinfo=timezone.utc).astimezone(TZ).date()
+    try:
+        ventana(ultima_pasada(ahora), hoy)
+        return hoy
+    except ValueError:
+        return hoy + timedelta(days=1)
+
+
+def generar(primeros: list[date] | None = None, pasada: datetime | None = None,
+            con_ensemble: bool = True) -> list[Path]:
+    """Genera las emisiones pedidas (por defecto, la que toca: ver primer_dia)."""
+    primeros = primeros or [primer_dia()]
     hechos = []
-    for d in dias:
-        if pasada is None and not pasadas_candidatas(d):
-            logger.info(f"{d}: ninguna pasada reciente lo cubre entero; se deja como está")
-            continue
+    for d in primeros:
         try:
-            hechos.append(generar_dia(d, pasada, con_ensemble=con_ensemble))
+            hechos.append(generar_emision(d, pasada, con_ensemble=con_ensemble))
         except Exception as e:     # noqa: BLE001
             logger.error(f"{d}: {e}")
     escribir_indice()

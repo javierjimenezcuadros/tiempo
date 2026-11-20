@@ -21,11 +21,13 @@ ECMWF Open Data ──► GitHub Actions (2 veces al día) ──► sitio/datos
 ```
 
 - **No hay servidor.** La página es estática y cada lector descarga un JSON de
-  unos 27 KB. Cloudflare aguanta el tráfico de la portada sin coste.
+  unos 160 KB (unos 30 KB comprimido). Cloudflare aguanta el tráfico de la portada sin coste.
 - **GitHub Actions** ejecuta el generador a las 9:20 y a las 21:20 UTC, cuando
-  ECMWF ya ha publicado la pasada de las 00 y la de las 12. Genera hoy y mañana,
-  guarda los JSON en el repositorio (así queda el archivo) y publica en
-  Cloudflare. También se lanza a mano: pestaña *Actions* → *Generar el tiempo*
+  ECMWF ya ha publicado la pasada de las 00 y la de las 12. Cada ejecución
+  escribe una *emisión*: un JSON con la previsión de un día y los cinco
+  siguientes (por la mañana, la de hoy; por la noche, la de mañana, con un día
+  menos). Las guarda en el repositorio (así queda el archivo: cada shot con
+  fecha conserva la semana tal como se dio) y publica en Cloudflare. También se lanza a mano: pestaña *Actions* → *Generar el tiempo*
   → *Run workflow*. Marcando «Solo publicar la web» no genera datos: sube la
   página tal como está en el repositorio (para cambios de diseño, en un minuto).
 - El shot de primera hora sale con la pasada de la noche anterior; a media
@@ -37,7 +39,7 @@ ECMWF Open Data ──► GitHub Actions (2 veces al día) ──► sitio/datos
 |---|---|
 | Máxima, mínima, lluvia del día (mapa y ficha) | IFS determinista de ECMWF (mx2t3, mn2t3, tp), celdas de 0,25° |
 | Cada 3 horas | 2t y tp del determinista (ECMWF Open Data no da pasos de una hora) |
-| Probabilidad de lluvia y seguridad | Los 50 escenarios del ensemble de ECMWF, misma pasada |
+| Probabilidad de lluvia y seguridad | Los 50 escenarios del ensemble de ECMWF, misma pasada (máxima y mínima, solo con los tramos de la tarde y de la madrugada, para no descargar 2,5 GB) |
 | Lo normal | ERA5 1991-2020 (Copernicus), máximas y mínimas diarias |
 
 Cada ciudad toma la celda cercana con tierra y altitud parecida, corregida por
@@ -84,9 +86,18 @@ python3 -m http.server 8127              # y abrir http://localhost:8127/pruebas
   loading="lazy"></iframe>
 ```
 
-Con `?d=AAAA-MM-DD` el shot se queda con la previsión de ese día. Con
-`&ciudad=Sevilla` abre en esa ciudad y con `&vista=lluvia`, en la pestaña de
-lluvia. La versión AMP del shot no ejecuta iframes: necesita una imagen y un
+Con `?d=AAAA-MM-DD` el shot se queda con la previsión de esa semana. Con
+`&ciudad=Sevilla` abre en esa ciudad; con `&vista=lluvia`, en la pestaña de
+lluvia, y con `&ficha=dias`, con la lista de los próximos días a la vista.
+
+## Próximos días
+
+La ficha tiene un interruptor «Por horas | 6 días». En «6 días», una fila por
+día (en el móvil, una columna) con la máxima, la mínima, la diferencia con lo
+normal y la probabilidad de lluvia. Tocar un día cambia todo el módulo a ese
+día: mapa, titular, cajas y tabla por horas. Son seis y no siete porque hasta
+el paso 144 ECMWF Open Data da datos cada 3 horas; el séptimo caería en pasos
+de 6 y necesitaría otra tabla. La versión AMP del shot no ejecuta iframes: necesita una imagen y un
 enlace de respaldo (pendiente).
 
 ## Con qué ciudad abre

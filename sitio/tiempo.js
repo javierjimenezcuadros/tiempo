@@ -1,11 +1,14 @@
 /* Módulo del tiempo. Lee mapa.json (dónde va cada punto y cada ciudad, fijo)
-   y datos/<fecha>.json (lo que genera GitHub dos veces al día).
+   y datos/<fecha>.json: la «emisión» de ese día, con su previsión y la de los
+   cinco siguientes tal como se dio ese día (lo genera GitHub dos veces al día).
+   Tocar un día en «6 días» cambia todo el módulo a ese día.
 
    Dirección:
      /                 el día de hoy (o el más cercano que haya)
      /?d=2026-11-21    ese día, para siempre (el shot de ese día hace de archivo)
      &ciudad=Sevilla   ciudad con la que abre
      &vista=lluvia     pestaña con la que abre
+     &ficha=dias       la ficha abre en «6 días» en vez de «Por horas»
 
    Sin &ciudad, abre en la última ciudad que eligió el lector en ese navegador;
    si no hay, en Las Palmas cuando su hora es la de Canarias, y si no, en Madrid.
@@ -50,7 +53,10 @@
   const catLluvia = (mm) => LLUVIA.findIndex(([lim]) => mm < lim);
 
   let M = null;          // mapa.json
-  let D = null;          // datos del día
+  let E = null;          // la emisión: {fecha, pasada_texto, dias: [...], enlace}
+  let D = null;          // el día que se ve (uno de E.dias)
+  let activo = 0;        // su índice en E.dias
+  let vistaFicha = 'horas';
   let vista = params.get('vista') === 'lluvia' ? 'lluvia' : 'temp';
   let ciudad = 'Madrid';
   let circulos = [];
@@ -210,6 +216,69 @@
         + `<span class="barra-p"><b style="width:${ancho}%"></b></span>`
         + `<span class="p${nada}">${txt}</span></li>`;
     }).join('');
+    listaDias();
+  }
+
+  // --- Próximos días ---------------------------------------------------------
+  function fechaLocal(d) {
+    return `${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())}`;
+  }
+  /** «Hoy» o «Mañana» según la fecha del aparato del lector; si no, «sáb 21». */
+  function etiquetaDia(dia) {
+    const h = new Date();
+    if (dia.fecha === fechaLocal(h)) return 'Hoy';
+    h.setDate(h.getDate() + 1);
+    if (dia.fecha === fechaLocal(h)) return 'Mañana';
+    return dia.corto || dia.fecha.slice(8);
+  }
+
+  function difCorta(dif) {
+    if (dif === null || dif === undefined) return ['', ''];
+    if (dif >= 1) return [`+${dif}°`, 'calor'];
+    if (dif <= -1) return [`−${-dif}°`, 'frio'];
+    return ['normal', ''];
+  }
+
+  function listaDias() {
+    $('boton-dias').textContent = `${E.dias.length} días`;
+    // Las emisiones antiguas traen un solo día: entonces no hay nada que elegir.
+    document.querySelector('.ficha-vista').hidden = E.dias.length < 2;
+    const cab = '<li class="cabecera"><span>Día</span><span>Máx.</span><span>Mín.</span><span title="Diferencia de la máxima con la normal 1991-2020 para la fecha">Normal</span><span>Lluvia</span></li>';
+    $('dias').innerHTML = cab + E.dias.map((dia, k) => {
+      const f = dia.ciudades[ciudad];
+      if (!f) return '';
+      const [dif, cls] = difCorta(f.max_dif);
+      const p = f.prob_lluvia;
+      const lluvia = p === null ? (f.lluvia >= 1 ? `${Math.round(f.lluvia)} mm` : '—') : `${p} %`;
+      return `<li><button type="button" class="dia-btn" data-k="${k}" aria-pressed="${k === activo}">`
+        + `<span class="d">${etiquetaDia(dia)}</span>`
+        + `<span class="t">${f.max}°</span><span class="m">${f.min}°</span>`
+        + `<span class="n ${cls}">${dif}</span>`
+        + `<span class="p${p !== null && p < 10 ? ' nada' : ''}">${lluvia}</span>`
+        + '</button></li>';
+    }).join('');
+  }
+
+  function cabecera() {
+    $('dia').textContent = D.dia;
+    $('titular').textContent = D.titular;
+  }
+
+  /** Cambia todo el módulo (mapa, titular, cajas y tabla por horas) a otro día. */
+  function elegirDia(k) {
+    if (!E.dias[k] || !E.dias[k].ciudades[ciudad]) return;
+    activo = k;
+    D = E.dias[k];
+    cabecera();
+    panel();
+    pintar();
+  }
+
+  function mostrarFicha(cual) {
+    vistaFicha = cual;
+    document.querySelectorAll('.ficha-vista button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.ficha === cual)));
+    $('horas').hidden = cual !== 'horas';
+    $('dias').hidden = cual !== 'dias';
   }
 
   /** Elección del lector (buscador o mapa): se recuerda para la próxima vez. */
@@ -292,11 +361,20 @@
     try {
       const [mapa, eleccion] = await Promise.all([leer('mapa.json'), elegirFecha()]);
       M = mapa;
-      D = await leer(`datos/${eleccion.fecha}.json`);
+      E = await leer(`datos/${eleccion.fecha}.json`);
+      if (!E.dias) {             // emisiones antiguas (versión 1): un solo día
+        E = { fecha: E.fecha, pasada_texto: E.pasada_texto, enlace: E.enlace,
+              dias: [{ fecha: E.fecha, dia: E.dia, titular: E.titular, puntos: E.puntos, ciudades: E.ciudades }] };
+      }
+      if (!E.dias.length) throw new Error('emisión vacía');
       if (eleccion.vieja) {
         $('aviso').textContent = ' · sin actualizar';
         $('aviso').hidden = false;
+        // Si la emisión vieja llega hasta hoy, al menos se abre en hoy.
+        const k = E.dias.findIndex((d) => d.fecha === hoy());
+        if (k > 0) activo = k;
       }
+      D = E.dias[activo];
     } catch (e) {
       fallo(params.get('d') ? 'No hay previsión guardada para esa fecha.' : 'No se ha podido cargar la previsión.');
       return;
@@ -304,14 +382,13 @@
     nombres = Object.keys(D.ciudades).sort((a, b) => a.localeCompare(b, 'es'));
     ciudad = ciudadInicial();
 
-    $('dia').textContent = D.dia;
-    $('titular').textContent = D.titular;
-    $('pie').textContent = `Datos: ECMWF (CC BY 4.0) · Lo normal: ERA5 1991-2020 (Copernicus) · Pasada de las ${D.pasada_texto}`;
-    if (D.enlace && D.enlace.url) {
+    cabecera();
+    $('pie').textContent = `Datos: ECMWF (CC BY 4.0) · Lo normal: ERA5 1991-2020 (Copernicus) · Pasada de las ${E.pasada_texto}`;
+    if (E.enlace && E.enlace.url) {
       const a = document.createElement('a');
-      a.href = D.enlace.url;
+      a.href = E.enlace.url;
       a.target = '_top';
-      a.textContent = D.enlace.texto || 'Lee la historia';
+      a.textContent = E.enlace.texto || 'Lee la historia';
       $('pie').append(' · ', a);
     }
     const priv = document.createElement('a');
@@ -328,9 +405,17 @@
         pintar();
       });
     });
+    document.querySelectorAll('.ficha-vista button').forEach((b) => {
+      b.addEventListener('click', () => mostrarFicha(b.dataset.ficha));
+    });
+    $('dias').addEventListener('click', (e) => {
+      const b = e.target.closest('.dia-btn');
+      if (b) elegirDia(Number(b.dataset.k));
+    });
     montarMapa();
     panel();
     pintar();
+    mostrarFicha(params.get('ficha') === 'dias' && E.dias.length > 1 ? 'dias' : 'horas');
     $('modulo').setAttribute('aria-busy', 'false');
   }
 
