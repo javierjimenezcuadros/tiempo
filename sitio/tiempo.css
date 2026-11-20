@@ -142,7 +142,7 @@ body {
 /* Tabla hora · temperatura · probabilidad de lluvia. A lo ancho, en filas;
    en el móvil, en columnas (una por franja de 3 horas). */
 .horas { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: auto repeat(8, 1fr); text-align: center; }
-.horas li { display: flex; flex-direction: column; gap: 1px; font-size: 12px; }
+.horas li { display: flex; flex-direction: column; gap: 0; font-size: 12px; }
 .horas li.cabecera { text-align: left; color: var(--tinta-suave); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; padding-right: 4px; }
 .horas li span { line-height: 24px; }     /* 3 × 24 = 72 px: lo mismo que la tira de días, para que el mapa no salte */
 .horas .t { font-weight: 700; font-size: 14px; }
@@ -174,27 +174,24 @@ body {
 /* Próximos días: en el móvil, una columna por día; a lo ancho, una fila por día.
    Cada día es un botón: tocarlo cambia todo el módulo a ese día. */
 .dias { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: auto repeat(6, 1fr); }
-.dias li.cabecera { display: flex; flex-direction: column; color: var(--tinta-suave); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 4px 2px 0; }
-.dias li.cabecera span { line-height: 16px; }
-/* En el móvil cada día va en cuatro líneas: día, máxima y mínima juntas
-   (la mínima en gris), diferencia con lo normal y lluvia. */
+.dias li.cabecera { display: flex; flex-direction: column; color: var(--tinta-suave); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; padding: 0 4px 0 0; }
+.dias li.cabecera span { line-height: 24px; height: 24px; }
+/* En el móvil cada día va en tres líneas: día, máxima y mínima juntas (la
+   mínima en gris) y lluvia. La diferencia con lo normal va solo en las cajas. */
 .dias li.cabecera span:nth-child(2) { font-size: 0; }
 .dias li.cabecera span:nth-child(2)::before { content: "Máx./mín."; font-size: 10px; }
 .dias li.cabecera span:nth-child(3) { display: none; }
 .dia-btn {
   width: 100%; font: inherit; border: 0; background: transparent; color: var(--tinta); cursor: pointer;
   display: grid; grid-template-columns: auto auto; justify-content: center; column-gap: 3px;
-  grid-template-areas: "d d" "t m" "n n" "p p"; text-align: center; padding: 2px 0; border-radius: 6px;
+  grid-template-areas: "d d" "t m" "p p"; text-align: center; padding: 0; border-radius: 6px;
 }
-.dia-btn span { line-height: 16px; font-size: 11px; white-space: nowrap; }
+.dia-btn span { line-height: 24px; font-size: 11px; white-space: nowrap; }   /* 3 × 24: como la tabla por horas */
 .dia-btn .d { grid-area: d; } .dia-btn .t { grid-area: t; } .dia-btn .m { grid-area: m; }
-.dia-btn .n { grid-area: n; } .dia-btn .p { grid-area: p; }
+.dia-btn .p { grid-area: p; }
 .dia-btn .d { color: var(--tinta-suave); }
 .dia-btn .t { font-weight: 700; font-size: 12px; }
 .dia-btn .m { color: var(--tinta-suave); }
-.dia-btn .n.calor { color: var(--calor); }
-.dia-btn .n.frio { color: var(--frio); }
-.dia-btn .n:empty::before { content: "·"; color: var(--linea); }
 .dia-btn .p { color: var(--lluvia); font-weight: 700; }
 .dia-btn .p.nada { color: #B9C1C9; font-weight: 400; }
 .dia-btn .barra-p { display: none; }
@@ -202,17 +199,18 @@ body {
 .dia-btn[aria-pressed="true"] .d { color: var(--acento-texto); font-weight: 700; }
 @container (min-width: 520px) {
   .dias { grid-template-columns: 1fr; }
-  .dias li.cabecera { display: grid; grid-template-columns: 44px 28px 24px 1fr 36px; gap: 4px; padding: 0 4px; letter-spacing: 0; }
+  .dias li.cabecera { display: grid; grid-template-columns: 1fr 34px 34px 44px; gap: 6px; padding: 0 4px; letter-spacing: 0; }
+  .dias li.cabecera span { line-height: 18px; height: auto; }
   .dias li.cabecera span:nth-child(2) { font-size: 10px; }
   .dias li.cabecera span:nth-child(2)::before { content: none; }
   .dias li.cabecera span:nth-child(3) { display: block; }
   .dias li.cabecera span:last-child { text-align: right; }
   .dias li + li { border-top: 1px solid var(--papel); }
   .dia-btn {
-    display: grid; grid-template-columns: 44px 28px 24px 1fr 36px; grid-template-areas: none;
+    display: grid; grid-template-columns: 1fr 34px 34px 44px; grid-template-areas: none;
     align-items: center; gap: 4px; padding: 3px 4px; text-align: left; justify-content: stretch;
   }
-  .dia-btn .d, .dia-btn .t, .dia-btn .m, .dia-btn .n, .dia-btn .p { grid-area: auto; }
+  .dia-btn .d, .dia-btn .t, .dia-btn .m, .dia-btn .p { grid-area: auto; }
   .dia-btn span { line-height: 22px; font-size: 12px; }
   .dia-btn .t { font-size: 13px; }
   .dia-btn .p { text-align: right; }

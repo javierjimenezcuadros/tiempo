@@ -232,28 +232,19 @@
     return dia.corto || dia.fecha.slice(8);
   }
 
-  function difCorta(dif) {
-    if (dif === null || dif === undefined) return ['', ''];
-    if (dif >= 1) return [`+${dif}°`, 'calor'];
-    if (dif <= -1) return [`−${-dif}°`, 'frio'];
-    return ['normal', ''];
-  }
-
   function listaDias() {
     $('boton-dias').textContent = `${E.dias.length} días`;
     // Las emisiones antiguas traen un solo día: entonces no hay nada que elegir.
     document.querySelector('.ficha-vista').hidden = E.dias.length < 2;
-    const cab = '<li class="cabecera"><span>Día</span><span>Máx.</span><span>Mín.</span><span title="Diferencia de la máxima con la normal 1991-2020 para la fecha">Normal</span><span>Lluvia</span></li>';
+    const cab = '<li class="cabecera"><span>Día</span><span>Máx.</span><span>Mín.</span><span>Lluvia</span></li>';
     $('dias').innerHTML = cab + E.dias.map((dia, k) => {
       const f = dia.ciudades[ciudad];
       if (!f) return '';
-      const [dif, cls] = difCorta(f.max_dif);
       const p = f.prob_lluvia;
       const lluvia = p === null ? (f.lluvia >= 1 ? `${Math.round(f.lluvia)} mm` : '—') : `${p} %`;
       return `<li><button type="button" class="dia-btn" data-k="${k}" aria-pressed="${k === activo}">`
         + `<span class="d">${etiquetaDia(dia)}</span>`
         + `<span class="t">${f.max}°</span><span class="m">${f.min}°</span>`
-        + `<span class="n ${cls}">${dif}</span>`
         + `<span class="p${p !== null && p < 10 ? ' nada' : ''}">${lluvia}</span>`
         + '</button></li>';
     }).join('');
