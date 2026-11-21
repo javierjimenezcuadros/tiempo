@@ -213,10 +213,63 @@ def test_ensemble_solo_tarde_y_madrugada():
     assert set(v.ens_max) | set(v.ens_min) <= set(v.extremos)
 
 
-def test_primer_dia_de_cada_ejecucion():
-    # Por la mañana (pasada de las 00), hoy; por la noche (la de las 12), mañana.
-    assert t.primer_dia(datetime(2026, 11, 20, 9, 20)) == date(2026, 11, 20)
-    assert t.primer_dia(datetime(2026, 11, 20, 21, 20)) == date(2026, 11, 21)
+def test_dias_de_la_pasada():
+    # Con la de las 00, la emisión de hoy y la de mañana; con la de las 12, solo mañana.
+    assert t.dias_de_la_pasada(datetime(2026, 11, 20, 0), datetime(2026, 11, 20, 9, 20)) == \
+        [date(2026, 11, 20), date(2026, 11, 21)]
+    assert t.dias_de_la_pasada(datetime(2026, 11, 20, 12), datetime(2026, 11, 20, 21, 20)) == \
+        [date(2026, 11, 21)]
+    # Por la noche, si la de las 12 aún no está, se rehace con la de las 00.
+    assert t.dias_de_la_pasada(datetime(2026, 11, 20, 0), datetime(2026, 11, 20, 21, 20)) == \
+        [date(2026, 11, 20), date(2026, 11, 21)]
+
+
+def test_ultima_pasada_publicada_salta_las_que_faltan():
+    publicadas = {datetime(2026, 11, 21, 0), datetime(2026, 11, 20, 12)}
+    run = t.ultima_pasada_publicada(datetime(2026, 11, 21, 18, 30), publicada=lambda r: r in publicadas)
+    assert run == datetime(2026, 11, 21, 0)
+    with pytest.raises(RuntimeError):
+        t.ultima_pasada_publicada(datetime(2026, 11, 21, 18, 30), publicada=lambda r: False)
+
+
+def test_no_pisa_una_emision_igual_o_mas_nueva(tmp_path, monkeypatch):
+    import json
+    (tmp_path / "2026-11-21.json").write_text(json.dumps({"pasada": "2026-11-21T00:00Z"}))
+    monkeypatch.setattr(t, "determinista", lambda *a: pytest.fail("no debía descargar nada"))
+    ruta = t.generar_emision(date(2026, 11, 21), datetime(2026, 11, 20, 12), salida=tmp_path)
+    assert json.loads(ruta.read_text())["pasada"] == "2026-11-21T00:00Z"
+    ruta = t.generar_emision(date(2026, 11, 21), datetime(2026, 11, 21, 0), salida=tmp_path)
+    assert json.loads(ruta.read_text())["pasada"] == "2026-11-21T00:00Z"
+
+
+def test_sin_publicar_no_se_pregunta_a_aws(tmp_path, monkeypatch):
+    import sys
+    import types
+    fuentes = []
+
+    class Cliente:
+        def __init__(self, source):
+            self.source = source
+
+        def retrieve(self, **kw):
+            fuentes.append(self.source)
+            raise RuntimeError("404 Client Error: Not Found for url: https://data.ecmwf.int/…")
+
+    monkeypatch.setitem(sys.modules, "ecmwf.opendata", types.SimpleNamespace(Client=Cliente))
+    monkeypatch.setattr(t, "CACHE", tmp_path)
+    with pytest.raises(RuntimeError):
+        t.bajar(datetime(2026, 11, 21, 12), "fc_prueba", type="fc", param="2t", step=[3])
+    assert fuentes == ["ecmwf"]
+
+
+def test_indice_sin_cambios_no_se_reescribe(tmp_path):
+    (tmp_path / "2026-11-21.json").write_text("{}")
+    ruta = t.escribir_indice(tmp_path)
+    antes = ruta.read_text()
+    (tmp_path / "otra.json").write_text("{}")          # no es una fecha: no cuenta
+    import time
+    time.sleep(0.01)
+    assert t.escribir_indice(tmp_path).read_text() == antes
 
 
 def test_tablas_del_repositorio_coinciden():

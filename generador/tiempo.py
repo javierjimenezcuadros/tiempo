@@ -133,6 +133,40 @@ def ultima_pasada(ahora: datetime | None = None) -> datetime:
     return base.replace(hour=12 if base.hour >= 12 else 0)
 
 
+def pasada_publicada(run: datetime) -> bool:
+    """¿Ha publicado ECMWF la pasada `run` hasta el paso 144 del ensemble? (0,3 s)
+
+    Pregunta por el índice del último paso que usa el módulo en el ensemble, que
+    es lo último en salir, sin descargar nada. Si la consulta falla por la red,
+    la da por publicada y ya lo dirá la descarga.
+    """
+    import requests
+
+    url = (f"https://data.ecmwf.int/forecasts/{run:%Y%m%d}/{run:%H}z/ifs/0p25/enfo/"
+           f"{run:%Y%m%d%H}0000-{PASO_MAX}h-enfo-ef.index")
+    try:
+        return requests.head(url, timeout=20).status_code == 200
+    except Exception as e:     # noqa: BLE001
+        logger.warning(f"No se pudo consultar la pasada {run:%d/%m %H} UTC ({e}); se intenta igual")
+        return True
+
+
+def ultima_pasada_publicada(ahora: datetime | None = None, publicada=None) -> datetime:
+    """La pasada 00/12 UTC más reciente que ECMWF ya ha publicado entera.
+
+    GitHub lanza las tareas programadas con horas de retraso: decidir por lo que
+    está publicado, y no por la hora, hace que una tarea que llega tarde haga lo
+    mismo que habría hecho a su hora.
+    """
+    publicada = publicada or pasada_publicada
+    base = ultima_pasada(ahora)
+    for k in range(4):
+        run = base - timedelta(hours=12 * k)
+        if publicada(run):
+            return run
+    raise RuntimeError(f"ECMWF no tiene publicada ninguna pasada desde la de las {base:%H} UTC del {base:%d/%m} hacia atrás.")
+
+
 def pasadas_candidatas(dia: date, ahora: datetime | None = None) -> list[datetime]:
     """Pasadas 00/12 UTC que cubren el día, de la más reciente a la más antigua."""
     base = ultima_pasada(ahora)
@@ -234,9 +268,15 @@ def bajar(run: datetime, nombre: str, **campos) -> Path:
             parcial.rename(destino)
             return destino
         except Exception as e:     # noqa: BLE001 — se prueba la siguiente fuente
-            logger.warning(f"{fuente}: {e}")
             parcial.unlink(missing_ok=True)
             error = e
+            if "404" in str(e):
+                # ECMWF dice que no existe (aún no está publicada): la copia de
+                # AWS no la tendrá antes, y preguntarle se quedó una vez 24
+                # minutos colgado antes de decir lo mismo.
+                logger.warning(f"{fuente}: no publicado ({e})")
+                break
+            logger.warning(f"{fuente}: {e}")
     raise RuntimeError(f"No se pudo descargar {nombre}: {error}")
 
 
@@ -533,18 +573,40 @@ def emision(primer: date, run: datetime, dias: list[dict]) -> dict:
     }
 
 
+def pasada_de(destino: Path) -> datetime | None:
+    """La pasada con la que se hizo una emisión ya escrita (None si no hay o no se lee)."""
+    try:
+        doc = json.loads(destino.read_text(encoding="utf-8"))
+        return datetime.strptime(doc["pasada"], "%Y-%m-%dT%H:00Z")
+    except Exception:          # noqa: BLE001
+        return None
+
+
 def generar_emision(primer: date, pasada: datetime | None = None, salida: Path = DATOS,
-                    con_ensemble: bool = True, n_dias: int = DIAS_EMISION) -> Path:
+                    con_ensemble: bool = True, n_dias: int = DIAS_EMISION,
+                    forzar: bool = False, publicada=None) -> Path:
     """Descarga, calcula y escribe la emisión que empieza en `primer`. Devuelve su ruta.
 
-    Usa la pasada más reciente que cubra `primer` y llega hasta donde esa pasada
-    dé datos cada 3 h (seis días con la de las 00, cinco con la de las 12).
+    Usa la pasada publicada más reciente que cubra `primer` y llega hasta donde
+    esa pasada dé datos cada 3 h (seis días con la de las 00, cinco con la de
+    las 12). Si ya hay una emisión de esa fecha con esa pasada o con una más
+    nueva, no hace nada (salvo con forzar): así se puede mirar a menudo.
     """
+    destino = salida / f"{primer:%Y-%m-%d}.json"
+    if pasada:
+        candidatas = [pasada]
+    else:
+        publicada = publicada or pasada_publicada
+        candidatas = [r for r in pasadas_candidatas(primer) if publicada(r)]
+    if not candidatas:
+        raise ValueError(f"Ninguna pasada publicada cubre el {primer:%d/%m/%Y}.")
+    previa = pasada_de(destino)
+    if not forzar and previa is not None and previa >= candidatas[0]:
+        logger.info(f"{destino.name}: ya está con la pasada de las {previa:%H} UTC del "
+                    f"{previa:%d/%m}; no hay nada nuevo")
+        return destino
     ciudades, celdas = cargar_tablas()
     nodos = [c["nodo"] for c in ciudades]
-    candidatas = [pasada] if pasada else pasadas_candidatas(primer)
-    if not candidatas:
-        raise ValueError(f"Ninguna pasada cubre el {primer:%d/%m/%Y}.")
     error = None
     for run in candidatas:
         try:
@@ -573,7 +635,6 @@ def generar_emision(primer: date, pasada: datetime | None = None, salida: Path =
         logger.info(f"  {d}: {dias[-1]['titular']}")
     doc = emision(primer, run, dias)
     salida.mkdir(parents=True, exist_ok=True)
-    destino = salida / f"{primer:%Y-%m-%d}.json"
     destino.write_text(json.dumps(doc, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     logger.info(f"{destino.name}: {len(dias)} días (pasada {doc['pasada_texto']})")
     return destino
@@ -589,6 +650,11 @@ def escribir_indice(salida: Path = DATOS) -> Path:
         except ValueError:
             continue
     destino = salida / "indice.json"
+    try:                       # sin cambios, no se toca (y GitHub no hace commit)
+        if json.loads(destino.read_text(encoding="utf-8")).get("fechas") == sorted(fechas):
+            return destino
+    except Exception:          # noqa: BLE001
+        pass
     destino.write_text(json.dumps({
         "fechas": sorted(fechas),
         "actualizado": datetime.now(TZ).isoformat(timespec="minutes"),
@@ -609,30 +675,39 @@ def limpiar_cache(dias: int = 3) -> None:
             continue
 
 
-def primer_dia(ahora: datetime | None = None) -> date:
-    """Con qué día empieza la emisión de esta ejecución.
+def dias_de_la_pasada(run: datetime, ahora: datetime | None = None) -> list[date]:
+    """Las emisiones que tocan con la pasada `run`.
 
-    Con la pasada de las 00 UTC (la de la mañana), hoy. La de las 12 UTC empieza
-    a media tarde y ya no cubre el día entero: su emisión empieza mañana, y la
-    de hoy se queda como la dejó la de la mañana.
+    Si la pasada cubre hoy entero (la de las 00 UTC), la de hoy y también la de
+    mañana: salen de las mismas descargas y así un shot con la fecha de mañana
+    siempre tiene datos aunque GitHub llegue tarde. Si no (la de las 12, que
+    empieza a media tarde), solo la de mañana; la de hoy se queda como estaba.
     """
     ahora = ahora or datetime.utcnow()
     hoy = ahora.replace(tzinfo=timezone.utc).astimezone(TZ).date()
     try:
-        ventana(ultima_pasada(ahora), hoy)
-        return hoy
+        ventana(run, hoy)
+        return [hoy, hoy + timedelta(days=1)]
     except ValueError:
-        return hoy + timedelta(days=1)
+        return [hoy + timedelta(days=1)]
 
 
 def generar(primeros: list[date] | None = None, pasada: datetime | None = None,
-            con_ensemble: bool = True) -> list[Path]:
-    """Genera las emisiones pedidas (por defecto, la que toca: ver primer_dia)."""
-    primeros = primeros or [primer_dia()]
+            con_ensemble: bool = True, forzar: bool = False) -> list[Path]:
+    """Genera las emisiones pedidas o, por defecto, las que tocan con la última pasada publicada.
+
+    Devuelve las emisiones que quedan al día (nuevas o que ya lo estaban); las
+    que fallan se registran y no se devuelven.
+    """
+    if primeros is None:
+        pasada = pasada or ultima_pasada_publicada()
+        primeros = dias_de_la_pasada(pasada)
+        logger.info(f"Pasada de las {pasada:%H} UTC del {pasada:%d/%m}: emisiones del "
+                    + " y del ".join(f"{d:%d/%m}" for d in primeros))
     hechos = []
     for d in primeros:
         try:
-            hechos.append(generar_emision(d, pasada, con_ensemble=con_ensemble))
+            hechos.append(generar_emision(d, pasada, con_ensemble=con_ensemble, forzar=forzar))
         except Exception as e:     # noqa: BLE001
             logger.error(f"{d}: {e}")
     escribir_indice()

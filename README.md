@@ -22,16 +22,23 @@ ECMWF Open Data ──► GitHub Actions (2 veces al día) ──► sitio/datos
 
 - **No hay servidor.** La página es estática y cada lector descarga un JSON de
   unos 160 KB (unos 30 KB comprimido). Cloudflare aguanta el tráfico de la portada sin coste.
-- **GitHub Actions** ejecuta el generador a las 9:20 y a las 21:20 UTC, cuando
-  ECMWF ya ha publicado la pasada de las 00 y la de las 12. Cada ejecución
-  escribe una *emisión*: un JSON con la previsión de un día y los cinco
-  siguientes (por la mañana, la de hoy; por la noche, la de mañana, con un día
-  menos). Las guarda en el repositorio (así queda el archivo: cada shot con
-  fecha conserva la semana tal como se dio) y publica en Cloudflare. También se lanza a mano: pestaña *Actions* → *Generar el tiempo*
+- **GitHub Actions** mira cada dos horas qué pasada ha publicado ECMWF (una
+  consulta de un segundo) y, si hay una nueva, genera las *emisiones* que
+  tocan: un JSON con la previsión de un día y los cinco siguientes. Con la
+  pasada de las 00 UTC (publicada hacia media mañana), la de hoy y la de
+  mañana; con la de las 12 (por la noche), la de mañana, con un día menos. Si
+  no hay nada nuevo, termina en un minuto. Guarda las emisiones en el
+  repositorio (así queda el archivo: cada shot con fecha conserva la semana tal
+  como se dio) y publica en Cloudflare. Nunca pisa una emisión con otra de una
+  pasada más antigua.
+- **Por qué cada dos horas:** GitHub lanza las tareas programadas con retraso,
+  a veces de horas. Decidir por lo que ECMWF ha publicado, y no por la hora,
+  hace que una tarea que llega tarde haga lo mismo que habría hecho a su hora.
+  El repositorio es público, así que los minutos de Actions no tienen límite. También se lanza a mano: pestaña *Actions* → *Generar el tiempo*
   → *Run workflow*. Marcando «Solo publicar la web» no genera datos: sube la
   página tal como está en el repositorio (para cambios de diseño, en un minuto).
 - El shot de primera hora sale con la pasada de la noche anterior; a media
-  mañana se actualiza con la de las 00.
+  mañana (o en cuanto GitHub llegue) se actualiza con la de las 00.
 
 ## De dónde sale cada cifra
 
