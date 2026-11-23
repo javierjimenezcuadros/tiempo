@@ -326,6 +326,7 @@ def test_celda_dia_compacta():
 def test_emision_escribe_las_zonas(tmp_path, monkeypatch):
     import json
     monkeypatch.setattr(t, "cargar_tablas", lambda: (CIUDADES_PRUEBA, [[40.5, -3.75]], ZONAS_PRUEBA))
+    monkeypatch.setattr(t, "huella_tablas", lambda: "abc123")
     nodos_pedidos = []
     monkeypatch.setattr(t, "determinista",
                         lambda run, d, c, n: nodos_pedidos.append(len(n)) or _prevision_con_celdas(run))
@@ -334,6 +335,7 @@ def test_emision_escribe_las_zonas(tmp_path, monkeypatch):
     assert nodos_pedidos == [4, 4]                     # 2 ciudades + 2 celdas
     z = json.loads((tmp_path / "2026-11-20" / "z" / "40_-4.json").read_text())
     assert z["horas"] == [[1, 4], [1, 4]] and list(z["celdas"]) == ["0"]
+    assert z["tablas"] == "abc123"                     # la página no mezcla tablas distintas
     assert len(z["celdas"]["0"]) == 2 and z["celdas"]["0"][0][:5] == [14.3, 3.0, 2.3, 4, 1]
     assert (tmp_path / "2026-11-20" / "z" / "28_-18.json").exists()
     # Con la emisión al día pero sin la carpeta de zonas, se rehace.

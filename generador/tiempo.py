@@ -526,6 +526,18 @@ def cargar_tablas() -> tuple[list[dict], list, list[dict]]:
     return ciudades, celdas, zonas
 
 
+def huella_tablas() -> str | None:
+    """La marca de las tablas de municipios (la pone herramientas/preparar_tablas.py).
+
+    Va en cada archivo de zona: la página no usa un archivo hecho con otras
+    tablas, porque el número de cada celda podría significar otra cosa.
+    """
+    try:
+        return json.loads((FIJOS / "celdas.json").read_text(encoding="utf-8")).get("tablas")
+    except FileNotFoundError:
+        return None
+
+
 _DIAS_CORTOS = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"]
 
 
@@ -697,14 +709,15 @@ def generar_emision(primer: date, pasada: datetime | None = None, salida: Path =
     doc = emision(primer, run, dias)
     salida.mkdir(parents=True, exist_ok=True)
     if zonas:
-        escribir_zonas(carpeta_zonas, primer, run, zonas, horas_dias, celdas_dias)
+        escribir_zonas(carpeta_zonas, primer, run, zonas, horas_dias, celdas_dias, huella_tablas())
     destino.write_text(json.dumps(doc, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     logger.info(f"{destino.name}: {len(dias)} días (pasada {doc['pasada_texto']})")
     return destino
 
 
 def escribir_zonas(carpeta: Path, primer: date, run: datetime, zonas: list[dict],
-                   horas_dias: list[list[int]], celdas_dias: list[list[list]]) -> None:
+                   horas_dias: list[list[int]], celdas_dias: list[list[list]],
+                   tablas: str | None = None) -> None:
     """Un archivo por zona de 2° × 2° con sus celdas: lo que la página descarga al elegir un municipio."""
     if carpeta.exists():
         shutil.rmtree(carpeta)
@@ -715,7 +728,7 @@ def escribir_zonas(carpeta: Path, primer: date, run: datetime, zonas: list[dict]
     for zona, celdas in por_zona.items():
         (carpeta / f"{zona}.json").write_text(json.dumps({
             "fecha": primer.isoformat(), "pasada": run.strftime("%Y-%m-%dT%H:00Z"),
-            "horas": horas_dias, "celdas": celdas,
+            "tablas": tablas, "horas": horas_dias, "celdas": celdas,
         }, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     logger.info(f"  {len(por_zona)} zonas con {len(zonas)} celdas de municipios")
 

@@ -67,7 +67,7 @@ rejilla de ERA5 mezcla las islas con el mar.
 
 ## Puesta en marcha (una vez)
 
-1. Repositorio privado en GitHub con este código.
+1. Repositorio en GitHub con este código (público: así los minutos de Actions no tienen límite).
 2. En Cloudflare: *My Profile* → *API Tokens* → *Create Token* → plantilla
    **Edit Cloudflare Workers**, limitada a tu cuenta. Copia el token.
 3. En GitHub: *Settings* → *Secrets and variables* → *Actions* →
@@ -108,10 +108,21 @@ Municipios y Entidades de Población del IGN (edición 2026, en
   principal (tope de ±1,5 °C; lo alcanzan unos 300 pueblos de sierra o de costa).
   Caen en 836 celdas, repartidas en 31 zonas de 2° × 2°.
 - La emisión principal sigue llevando las 59 ciudades. La previsión de cada
-  celda va aparte, en `sitio/datos/AAAA-MM-DD/z/<zona>.json` (unos 30 KB por
-  zona), que la página solo descarga al elegir un municipio de esa zona, y le
+  celda va aparte, en `sitio/datos/AAAA-MM-DD/z/<zona>.json` (unos 18 KB por
+  zona, 4 KB comprimido), que la página solo descarga al elegir un municipio de esa zona, y le
   aplica la corrección por altitud. La lista de municipios (`sitio/municipios.json`,
-  ~460 KB, ~100 KB comprimida) solo se descarga al tocar el buscador.
+  ~450 KB, ~120 KB comprimida) solo se descarga al tocar el buscador.
+- **Tocar el mapa:** cada punto elige el municipio más poblado de los que caen
+  en él (cada municipio cae en el punto más cercano a su núcleo; los puntos
+  donde no cae ninguno toman el más cercano). Va calculado en `mapa.json`
+  («lugares»), que por eso pesa ~17 KB comprimido. Tocar el rótulo de una
+  ciudad elige esa ciudad.
+- **Marca de las tablas:** `preparar_tablas.py` pone la misma marca («tablas»)
+  en `mapa.json`, `municipios.json` y `celdas.json`, y el generador la copia en
+  cada archivo de zona. La página guarda el lugar elegido con su zona, su celda
+  y esa marca, así que al volver abre sin descargar la lista de municipios; si
+  la marca ya no coincide (se rehicieron las tablas), lo busca por el nombre.
+  Tampoco usa un archivo de zona hecho con otras tablas.
 - Los archivos por zona se guardan dos semanas; las emisiones, siempre. En un
   shot más antiguo, al elegir un municipio se ve la ciudad más cercana, con aviso.
 - Las tablas las rehace `herramientas/preparar_tablas.py` (en el Mac, con el
@@ -120,8 +131,8 @@ Municipios y Entidades de Población del IGN (edición 2026, en
 ## Próximos días
 
 La ficha tiene un interruptor «Por horas | 6 días». En «6 días», una fila por
-día (en el móvil, una columna) con la máxima, la mínima, la diferencia con lo
-normal y la probabilidad de lluvia. Tocar un día cambia todo el módulo a ese
+día (en el móvil, una columna) con la máxima, la mínima y la probabilidad de
+lluvia (la diferencia con lo normal va solo en las cajas). Tocar un día cambia todo el módulo a ese
 día: mapa, titular, cajas y tabla por horas. Son seis y no siete porque hasta
 el paso 144 ECMWF Open Data da datos cada 3 horas; el séptimo caería en pasos
 de 6 y necesitaría otra tabla. La versión AMP del shot no ejecuta iframes: necesita una imagen y un
@@ -138,8 +149,11 @@ xataka.com).
 
 ## Privacidad
 
-Lo único que se guarda es el nombre de la ciudad elegida (localStorage,
-clave `tiempo.ciudad`), y solo cuando el lector la elige. No hay cookies,
+Lo único que se guarda es el lugar elegido (localStorage, clave
+`tiempo.lugar`: nombre, provincia y, en los municipios, zona, celda,
+corrección, sitio en el dibujo y marca de las tablas), y solo cuando el lector
+lo elige. La primera versión guardaba `tiempo.ciudad`; la página lo borra al
+guardar el nuevo. No hay cookies,
 medición ni recursos de terceros. Está contado en `sitio/privacidad.html`,
 enlazada en el pie del módulo: si cambia lo que la página guarda o envía, hay
 que cambiarla también.

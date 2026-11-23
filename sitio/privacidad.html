@@ -24,10 +24,13 @@
   <p class="fecha">Actualizado el 23 de noviembre de 2026</p>
 
   <h2>Qué guarda</h2>
-  <p>Solo una cosa: el nombre de la última ciudad o municipio que elegiste en el
-  buscador o en el mapa (y su provincia), para que la próxima vez el módulo se
-  abra ahí. Se guarda en el almacenamiento local de tu navegador (con el nombre
-  <code>tiempo.lugar</code>), no sale de él y no se usa para nada más. Si no
+  <p>Solo una cosa: la última ciudad o municipio que elegiste en el buscador o en
+  el mapa, para que la próxima vez el módulo se abra ahí. Se guarda su nombre y
+  su provincia y, para no tener que volver a descargar la lista de municipios,
+  datos que salen del propio municipio: la zona y la celda del modelo en las que
+  cae, su corrección por altitud y su sitio en el mapa. Va en el almacenamiento
+  local de tu navegador (con el nombre <code>tiempo.lugar</code>), no sale de él
+  y no se usa para nada más. Si no
   eliges ningún lugar, no se guarda nada. Se borra borrando los datos de navegación; algunos navegadores,
   como Safari, también lo borran solos al cabo de un tiempo.</p>
 
@@ -58,8 +61,10 @@
 
   <h2>Qué se descarga al buscar</h2>
   <p>La primera vez que tocas el buscador, la página descarga del mismo servidor
-  la lista de municipios; al elegir uno, el archivo con la previsión de su zona.
-  No se envía qué buscas ni qué eliges.</p>
+  la lista de municipios; al elegir uno (en el buscador o en el mapa), el
+  archivo con la previsión de su zona, que cubre unos 200 × 200 km. El
+  servidor ve qué archivo se pide, como cualquier otra petición, pero no qué
+  buscas ni qué municipio eliges.</p>
 </main>
 </body>
 </html>

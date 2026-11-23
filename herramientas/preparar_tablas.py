@@ -23,6 +23,7 @@ dibujo del mapa:
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import math
 import sys
@@ -169,25 +170,30 @@ def main() -> None:
         "ciudades": ciudades,
     }, ensure_ascii=False, indent=1), encoding="utf-8")
     (FIJOS / "puntos.json").write_text(json.dumps({"celdas": celdas}), encoding="utf-8")
+    with xr.open_dataset(ETOPO) as ds:
+        celdas_m, lista_m = preparar_municipios(lats, lons, tierra, oro, clim, ds["z"])
+    tablas = huella(celdas_m, lista_m)
+    lugares = lugares_de_los_puntos(puntos, lista_m)
     (SITIO / "mapa.json").write_text(json.dumps({
-        "version": 1,
+        "version": 1, "tablas": tablas,
         "ancho": round(float(W), 1), "alto": round(float(H), 1),
         "recuadro": [round(float(v), 1) for v in (C_X0, C_Y0, C_W, C_H)],
         "puntos": puntos,
         "ciudades": {c["nombre"]: xy(c["lat"], c["lon"]) for c in ciudades},
         "etiquetas": ETIQUETAS,
+        # El municipio que se elige al tocar cada punto, con los campos de municipios.json
+        "campos": CAMPOS_MUNICIPIO,
+        "lugares": [None if k < 0 else lista_m[k] for k in lugares],
     }, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    with xr.open_dataset(ETOPO) as ds:
-        celdas_m, lista_m = preparar_municipios(lats, lons, tierra, oro, clim, ds["z"])
     (FIJOS / "celdas.json").write_text(json.dumps({
-        "version": 1,
+        "version": 1, "tablas": tablas,
         "fuentes": "Municipios: obra derivada de NGMEP CC-BY 4.0 ign.es. Celdas: ECMWF Open Data "
                    "(CC BY 4.0). Normal: ERA5 1991-2020 (Copernicus).",
         "celdas": celdas_m,
     }, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     (SITIO / "municipios.json").write_text(json.dumps({
-        "version": 1, "fuente": "Obra derivada de NGMEP CC-BY 4.0 ign.es",
-        "campos": ["nombre", "provincia", "zona", "celda", "corr", "x", "y", "ciudad"],
+        "version": 1, "tablas": tablas, "fuente": "Obra derivada de NGMEP CC-BY 4.0 ign.es",
+        "campos": CAMPOS_MUNICIPIO,
         "lista": lista_m,
     }, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(f"{len(ciudades)} ciudades · {len(puntos)} puntos")
@@ -239,6 +245,9 @@ def zona_de(lat: float, lon: float) -> str:
     return f"{2 * math.floor(lat / 2)}_{2 * math.floor(lon / 2)}"
 
 
+CAMPOS_MUNICIPIO = ["nombre", "provincia", "zona", "celda", "corr", "x", "y", "ciudad"]
+
+
 def preparar_municipios(lats, lons, tierra, oro, clim, etopo) -> tuple[list[dict], list[list]]:
     """Celda, corrección y sitio en el dibujo de cada municipio; normales de cada celda."""
     municipios = leer_municipios()
@@ -271,6 +280,47 @@ def preparar_municipios(lats, lons, tierra, oro, clim, etopo) -> tuple[list[dict
     print(f"{len(lista)} municipios en {len(celdas)} celdas y {len({c['zona'] for c in celdas})} zonas; "
           f"{sum(1 for x in lista if x[7])} enlazados con su ciudad")
     return celdas, lista
+
+
+def huella(celdas_m: list[dict], lista_m: list[list]) -> str:
+    """Marca de estas tablas: cambia si cambia la celda, la zona o la corrección de algún municipio.
+
+    Va en mapa.json, municipios.json, celdas.json y (desde el generador) en
+    cada archivo de zona. La página la guarda con el lugar elegido para no
+    descargar la lista de municipios al volver; si no coincide con la de
+    mapa.json, lo vuelve a buscar por el nombre.
+    """
+    texto = json.dumps([celdas_m, lista_m], ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha1(texto.encode("utf-8")).hexdigest()[:10]
+
+
+LEJOS = 10.0   # en unidades del dibujo; entre dos puntos vecinos hay de 7,7 a 10
+
+
+def lugares_de_los_puntos(puntos: list[list[float]], lista_m: list[list]) -> list[int]:
+    """Para cada punto del mapa, el municipio que se elige al tocarlo (índice en lista_m, o -1).
+
+    Cada municipio cae en el punto más cercano a su núcleo en el dibujo. La
+    lista va de más a menos poblada, así que el primero que cae en un punto es
+    el mayor de los suyos. Un punto en el que no cae ninguno (sierras, rayas)
+    se queda con el municipio más cercano; si no hay ninguno a menos de LEJOS,
+    con ninguno.
+    """
+    con_pos = [k for k, m in enumerate(lista_m) if m[5] is not None]
+    mun = np.array([[lista_m[k][5], lista_m[k][6]] for k in con_pos], dtype=float)
+    pts = np.array(puntos, dtype=float)
+    d2 = ((mun[:, None, :] - pts[None, :, :]) ** 2).sum(-1)
+    cerca = d2.argmin(axis=1)
+    lugar = [-1] * len(puntos)
+    for i, j in enumerate(cerca):
+        if lugar[j] < 0 and d2[i, j] <= LEJOS ** 2:
+            lugar[j] = con_pos[i]
+    for j in range(len(puntos)):
+        if lugar[j] < 0:
+            i = int(d2[:, j].argmin())
+            if d2[i, j] <= LEJOS ** 2:
+                lugar[j] = con_pos[i]
+    return lugar
 
 
 def dia_21nov() -> int:

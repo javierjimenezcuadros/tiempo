@@ -21,8 +21,14 @@
    Sin &ciudad, abre en el último lugar que eligió el lector en ese navegador;
    si no hay, en Las Palmas cuando su hora es la de Canarias, y si no, en Madrid.
 
+   Tocar un punto del mapa elige el municipio más poblado de los que caen en
+   él (mapa.json lo trae calculado); tocar el rótulo de una ciudad, esa ciudad.
+
    Lo único que guarda es ese lugar (localStorage, clave tiempo.lugar), y solo
-   cuando el lector lo elige. No envía nada. Si cambia lo que guarda o envía,
+   cuando el lector lo elige: su nombre y su provincia y, para abrir sin
+   descargar la lista de municipios, su zona, su celda, su corrección por
+   altitud, su sitio en el dibujo y la marca de las tablas (mapa.json «tablas»;
+   si cambian, se vuelve a buscar por el nombre). No envía nada. Si cambia lo que guarda o envía,
    hay que cambiar también privacidad.html. */
 (() => {
   'use strict';
@@ -102,15 +108,19 @@
   // Municipios (se descargan la primera vez que se toca el buscador) y zonas
   let municipios = null;
   let cargaMunicipios = null;
+  /** De una fila compacta (campos de municipios.json) a un municipio. */
+  function lector(campos) {
+    const i = Object.fromEntries(campos.map((c, k) => [c, k]));
+    return (m) => ({
+      nombre: m[i.nombre], provincia: m[i.provincia], zona: m[i.zona], celda: m[i.celda],
+      corr: m[i.corr], pos: m[i.x] === null ? null : [m[i.x], m[i.y]], ciudad: m[i.ciudad] || null,
+      clave: llano(m[i.nombre]),
+    });
+  }
   function cargarMunicipios() {
     if (!cargaMunicipios) {
       cargaMunicipios = leer('municipios.json').then((j) => {
-        const i = Object.fromEntries(j.campos.map((c, k) => [c, k]));
-        municipios = j.lista.map((m) => ({
-          nombre: m[i.nombre], provincia: m[i.provincia], zona: m[i.zona], celda: m[i.celda],
-          corr: m[i.corr], pos: m[i.x] === null ? null : [m[i.x], m[i.y]], ciudad: m[i.ciudad] || null,
-          clave: llano(m[i.nombre]),
-        }));
+        municipios = j.lista.map(lector(j.campos));
         return municipios;
       }).catch(() => { cargaMunicipios = null; return null; });
     }
@@ -172,9 +182,9 @@
   const CORTOS = { 'Santa Cruz de Tenerife': 'S. C. Tenerife', 'Santiago de Compostela': 'Santiago',
                    'Jerez de la Frontera': 'Jerez' };
 
-  function rotulo(nombre, [x, y], texto, lado) {
+  function rotulo(nombre, [x, y], texto, lado, ciudad = '') {
     const pos = { der: [x + 7, y + 5, 'start'], izq: [x - 7, y + 5, 'end'], abajo: [x, y + 19, 'middle'] }[lado];
-    const t = el('text', { x: pos[0], y: pos[1], 'text-anchor': pos[2] });
+    const t = el('text', { x: pos[0], y: pos[1], 'text-anchor': pos[2], 'data-ciudad': ciudad });
     t.append(document.createTextNode(`${CORTOS[nombre] || nombre} `));
     const v = el('tspan', { class: 'valor' });
     v.textContent = texto;
@@ -198,7 +208,7 @@
       if (!M.ciudades[nombre] || !D.ciudades[nombre]) continue;
       const [x, y] = M.ciudades[nombre];
       capaTexto.append(el('circle', { cx: x, cy: y, r: 2.4, fill: '#10161D' }));
-      rotulo(nombre, [x, y], valor(D.ciudades[nombre]), lado);
+      rotulo(nombre, [x, y], valor(D.ciudades[nombre]), lado, nombre);
     }
     const pos = posLugar();
     if (pos) {
@@ -357,7 +367,8 @@
     }
     if (m.zona === undefined) return false;
     const z = await cargarZona(m.zona);
-    if (z && z.celdas[String(m.celda)]) {
+    const mismas = !z || !z.tablas || !M.tablas || z.tablas === M.tablas;   // si no, la celda sería otra
+    if (z && mismas && z.celdas[String(m.celda)]) {
       lugar = { nombre: m.nombre, provincia: m.provincia, zona: m.zona, celda: m.celda, corr: m.corr, pos: m.pos };
       return true;
     }
@@ -388,7 +399,19 @@
     } catch (e) { return null; }
   }
   function recordar(m) {
-    try { localStorage.setItem(CLAVE, JSON.stringify({ nombre: m.nombre || m.ciudad, provincia: m.provincia || null })); } catch (e) { /* sin almacenamiento */ }
+    const g = { nombre: m.nombre || m.ciudad, provincia: m.provincia || null };
+    if (m.ciudad) g.ciudad = m.ciudad;
+    else if (m.zona !== undefined) Object.assign(g, { zona: m.zona, celda: m.celda, corr: m.corr, pos: m.pos, tablas: M.tablas || null });
+    try {
+      localStorage.setItem(CLAVE, JSON.stringify(g));
+      localStorage.removeItem('tiempo.ciudad');
+    } catch (e) { /* sin almacenamiento */ }
+  }
+  /** El lugar recordado, si se puede poner sin descargar la lista de municipios. */
+  function recordadoDirecto(g) {
+    if (g.ciudad) return D.ciudades[g.ciudad] ? { nombre: g.nombre || g.ciudad, ciudad: g.ciudad } : null;
+    if (g.zona === undefined || !M.tablas || g.tablas !== M.tablas) return null;
+    return { nombre: g.nombre, provincia: g.provincia, zona: g.zona, celda: g.celda, corr: g.corr, pos: g.pos || null };
   }
   function horaDeCanarias() {
     try { return Intl.DateTimeFormat().resolvedOptions().timeZone === 'Atlantic/Canary'; } catch (e) { return false; }
@@ -408,10 +431,17 @@
 
   /** Lugar con el que abre: el de la dirección, el recordado, Las Palmas o Madrid. */
   async function lugarInicial() {
-    const guardado = recordado();
-    for (const [n, p] of [[params.get('ciudad'), null], [guardado && guardado.nombre, guardado && guardado.provincia]]) {
-      const m = await buscarLugar(n, p);
+    const pedido = params.get('ciudad');
+    if (pedido) {
+      const m = await buscarLugar(pedido, null);
       if (m && (await ponerLugar(m))) return;
+    }
+    const g = recordado();
+    if (g) {
+      const directo = recordadoDirecto(g);
+      if (directo && (await ponerLugar(directo))) return;
+      const m = await buscarLugar(g.nombre, g.provincia);       // guardado antes o con otras tablas
+      if (m && (await ponerLugar(m))) { recordar(m); return; }    // completo, para la próxima vez
     }
     const c = horaDeCanarias() && D.ciudades['Las Palmas'] ? 'Las Palmas' : (D.ciudades.Madrid ? 'Madrid' : Object.keys(D.ciudades)[0]);
     lugar = { nombre: c, ciudad: c };
@@ -545,19 +575,28 @@
     $('modulo').setAttribute('aria-busy', 'false');
   }
 
-  // Tocar el mapa elige la ciudad más cercana (si está a menos de ~1°)
+  // Tocar el mapa: el rótulo de una ciudad elige esa ciudad; un punto, el
+  // municipio más poblado de los que caen en él (mapa.json «lugares»).
   svg.addEventListener('click', (e) => {
     if (!M || !D) return;
     const pt = svg.createSVGPoint();
     pt.x = e.clientX; pt.y = e.clientY;
     const p = pt.matrixTransform(svg.getScreenCTM().inverse());
-    let mejor = null, dist = 45;
-    for (const [nombre, pos] of Object.entries(M.ciudades)) {
-      if (!pos || !D.ciudades[nombre]) continue;
-      const d = Math.hypot(pos[0] - p.x, pos[1] - p.y);
-      if (d < dist) { mejor = nombre; dist = d; }
+    for (const t of capaTexto.querySelectorAll('text')) {
+      const b = t.getBBox();
+      if (p.x >= b.x - 2 && p.x <= b.x + b.width + 2 && p.y >= b.y - 2 && p.y <= b.y + b.height + 2) {
+        const c = t.getAttribute('data-ciudad');        // vacío: el rótulo del lugar que ya se ve
+        if (c && D.ciudades[c]) elegir({ nombre: c, ciudad: c });
+        return;
+      }
     }
-    if (mejor) elegir({ nombre: mejor, ciudad: mejor });
+    let mejor = -1, dist = 12;                          // entre dos puntos vecinos hay de 8 a 10
+    M.puntos.forEach(([x, y], k) => {
+      const d = Math.hypot(x - p.x, y - p.y);
+      if (d < dist) { mejor = k; dist = d; }
+    });
+    const fila = mejor >= 0 && M.lugares && M.lugares[mejor];
+    if (fila) elegir(lector(M.campos)(fila));
   });
 
   arrancar();
