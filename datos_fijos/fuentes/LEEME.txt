@@ -1,0 +1,8 @@
+MUNICIPIOS_NGMEP_2026.csv: tabla MUNICIPIOS del Nomenclátor Geográfico de
+Municipios y Entidades de Población (NGMEP), edición 2026, del Instituto
+Geográfico Nacional (Centro de Descargas del CNIG, descargada el 2026-11-23).
+Convertida de ISO-8859-1 a UTF-8, sin más cambios.
+
+Licencia compatible con CC BY 4.0: NGMEP CC-BY 4.0 ign.es. Lo que se genera a
+partir de ella (sitio/municipios.json, datos_fijos/celdas.json) es obra
+derivada de NGMEP CC-BY 4.0 ign.es.

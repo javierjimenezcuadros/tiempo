@@ -6,6 +6,11 @@ Escribe:
     de cada día del año.
   - datos_fijos/puntos.json: las celdas de 0,25° que forman el mapa de España.
   - sitio/mapa.json: dónde va cada punto y cada ciudad en el dibujo.
+  - datos_fijos/celdas.json: las celdas donde caen los ~8.100 municipios del
+    nomenclátor del IGN, con su zona de 2° × 2° y sus normales.
+  - sitio/municipios.json: cada municipio con su provincia, su celda, su
+    corrección por altitud y su sitio en el dibujo, de más a menos poblado.
+    Obra derivada de NGMEP CC-BY 4.0 ign.es (datos_fijos/fuentes/).
 
 Se ejecuta en el Mac con el entorno de BenBaso, porque necesita datos que
 solo están allí: el relieve ETOPO 2022 y la climatología ERA5 de máximas y
@@ -17,8 +22,11 @@ dibujo del mapa:
 
 from __future__ import annotations
 
+import csv
 import json
+import math
 import sys
+import unicodedata
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -36,6 +44,13 @@ from generador.tiempo import (                                  # noqa: E402
 )
 
 ETOPO = BENBASO / "data" / "elevation" / "etopo2022_europe.nc"
+FUENTE_MUNICIPIOS = FIJOS / "fuentes" / "MUNICIPIOS_NGMEP_2026.csv"
+# Ciudades cuyo municipio no se llama igual (ni en una de sus partes «a/b»).
+MUNICIPIO_DE_CIUDAD = {
+    "Castellón": "Castelló de la Plana/Castellón de la Plana",
+    "Vitoria": "Vitoria-Gasteiz",
+    "Las Palmas": "Las Palmas de Gran Canaria",
+}
 
 # Las 45 de BenBaso (43 capitales, Vigo y Gijón) más las capitales que faltaban,
 # Ceuta, Melilla y algunas ciudades grandes o capitales autonómicas.
@@ -162,11 +177,100 @@ def main() -> None:
         "ciudades": {c["nombre"]: xy(c["lat"], c["lon"]) for c in ciudades},
         "etiquetas": ETIQUETAS,
     }, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    with xr.open_dataset(ETOPO) as ds:
+        celdas_m, lista_m = preparar_municipios(lats, lons, tierra, oro, clim, ds["z"])
+    (FIJOS / "celdas.json").write_text(json.dumps({
+        "version": 1,
+        "fuentes": "Municipios: obra derivada de NGMEP CC-BY 4.0 ign.es. Celdas: ECMWF Open Data "
+                   "(CC BY 4.0). Normal: ERA5 1991-2020 (Copernicus).",
+        "celdas": celdas_m,
+    }, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    (SITIO / "municipios.json").write_text(json.dumps({
+        "version": 1, "fuente": "Obra derivada de NGMEP CC-BY 4.0 ign.es",
+        "campos": ["nombre", "provincia", "zona", "celda", "corr", "x", "y", "ciudad"],
+        "lista": lista_m,
+    }, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(f"{len(ciudades)} ciudades · {len(puntos)} puntos")
     for c in ciudades:
         print(f"  {c['nombre']:24s} alt {c['altitud']:5d} celda {c['altitud_celda']:5d} "
               f"corr {c['correccion']:+.2f} normal max (21 nov) "
               f"{c['normal_max'][dia_21nov()] if c['normal_max'] else '—'}")
+
+
+def llano(s: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn").lower().strip()
+
+
+def leer_municipios() -> list[dict]:
+    """La tabla MUNICIPIOS del nomenclátor: nombre, provincia, población, coordenadas y altitud."""
+    def num(v):
+        return float(v.replace(",", ".")) if v and v.strip() else None
+
+    out = []
+    with open(FUENTE_MUNICIPIOS, encoding="utf-8", newline="") as f:
+        for r in csv.DictReader(f, delimiter=";"):
+            out.append({
+                "ine": r["COD_INE"], "nombre": r["NOMBRE_ACTUAL"].strip(),
+                # «Alacant/Alicante» → «Alicante»: la última parte es la castellana
+                "provincia": r["PROVINCIA"].split("/")[-1].strip(),
+                "poblacion": int(r["POBLACION_MUNI"] or 0),
+                "lat": num(r["LATITUD_ETRS89_REGCAN95"]), "lon": num(r["LONGITUD_ETRS89_REGCAN95"]),
+                "altitud": num(r["ALTITUD"]),
+            })
+    return out
+
+
+def ciudades_en_municipios(ciudades: list[str], municipios: list[dict]) -> dict[str, str]:
+    """{código INE: ciudad} para enlazar cada una de las 59 ciudades con su municipio."""
+    out = {}
+    for ciudad in ciudades:
+        objetivo = llano(MUNICIPIO_DE_CIUDAD.get(ciudad, ciudad))
+        cand = [m for m in municipios
+                if llano(m["nombre"]) == objetivo or any(llano(p) == objetivo for p in m["nombre"].split("/"))]
+        if not cand:
+            print(f"Aviso: no encuentro el municipio de {ciudad}")
+            continue
+        out[max(cand, key=lambda m: m["poblacion"])["ine"]] = ciudad
+    return out
+
+
+def zona_de(lat: float, lon: float) -> str:
+    """Zona de 2° × 2° (esquina suroeste): «40_-4»."""
+    return f"{2 * math.floor(lat / 2)}_{2 * math.floor(lon / 2)}"
+
+
+def preparar_municipios(lats, lons, tierra, oro, clim, etopo) -> tuple[list[dict], list[list]]:
+    """Celda, corrección y sitio en el dibujo de cada municipio; normales de cada celda."""
+    municipios = leer_municipios()
+    a_ciudad = ciudades_en_municipios(list(CIUDADES), municipios)
+    indice, celdas, lista = {}, [], []
+    for m in sorted(municipios, key=lambda m: -m["poblacion"]):
+        if m["lat"] is None:
+            continue
+        alt = m["altitud"]
+        if alt is None:
+            alt = max(0.0, float(etopo.sel(lat=m["lat"], lon=m["lon"], method="nearest")))
+        n = elegir_nodo(m["lat"], m["lon"], lats, lons, tierra, oro, alt)
+        clave = (n.lat, n.lon)
+        if clave not in indice:
+            indice[clave] = len(celdas)
+            celdas.append({"lat": n.lat, "lon": n.lon, "zona": zona_de(n.lat, n.lon),
+                           "altitud": round(n.altitud_celda), "normal_max": None, "normal_min": None})
+        k = indice[clave]
+        p = xy(m["lat"], m["lon"])
+        lista.append([m["nombre"], m["provincia"], celdas[k]["zona"], k, round(n.correccion, 1),
+                      None if p is None else round(p[0]), None if p is None else round(p[1]),
+                      a_ciudad.get(m["ine"])])
+    for c in celdas:
+        if c["lat"] >= 30:   # Canarias sin normal, como las ciudades
+            for kind in ("max", "min"):
+                c0 = clim[kind][0]
+                i = int(np.argmin(np.abs(c0.lats - c["lat"])))
+                j = int(np.argmin(np.abs(c0.lons - c["lon"])))
+                c[f"normal_{kind}"] = [round(float(f.data[i, j]), 1) for f in clim[kind]]
+    print(f"{len(lista)} municipios en {len(celdas)} celdas y {len({c['zona'] for c in celdas})} zonas; "
+          f"{sum(1 for x in lista if x[7])} enlazados con su ciudad")
+    return celdas, lista
 
 
 def dia_21nov() -> int:

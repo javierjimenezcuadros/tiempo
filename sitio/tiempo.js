@@ -1,21 +1,29 @@
 /* Módulo del tiempo. Lee mapa.json (dónde va cada punto y cada ciudad, fijo)
    y datos/<fecha>.json: la «emisión» de ese día, con su previsión y la de los
-   cinco siguientes tal como se dio ese día (lo genera GitHub dos veces al día).
-   Tocar un día en «6 días» cambia todo el módulo a ese día.
+   cinco siguientes tal como se dio ese día (lo genera GitHub). Tocar un día en
+   «6 días» cambia todo el módulo a ese día.
+
+   Lugares: las 59 ciudades vienen en la emisión. Los demás municipios (unos
+   8.100, nomenclátor del IGN) están en municipios.json, que solo se descarga al
+   tocar el buscador; al elegir uno se descarga el archivo de su zona
+   (datos/<fecha>/z/<zona>.json) con la previsión de su celda del modelo, que
+   la página corrige por la altitud del municipio. Si falta ese archivo (las
+   emisiones de hace más de dos semanas no lo guardan), se ve la ciudad más
+   cercana y se avisa.
 
    Dirección:
      /                 el día de hoy (o el más cercano que haya)
      /?d=2026-11-21    ese día, para siempre (el shot de ese día hace de archivo)
-     &ciudad=Sevilla   ciudad con la que abre
+     &ciudad=Sevilla   ciudad o municipio con el que abre
      &vista=lluvia     pestaña con la que abre
      &ficha=dias       la ficha abre en «6 días» en vez de «Por horas»
 
-   Sin &ciudad, abre en la última ciudad que eligió el lector en ese navegador;
+   Sin &ciudad, abre en el último lugar que eligió el lector en ese navegador;
    si no hay, en Las Palmas cuando su hora es la de Canarias, y si no, en Madrid.
 
-   Lo único que guarda es el nombre de esa ciudad (localStorage, clave
-   tiempo.ciudad), y solo cuando el lector la elige. No envía nada. Si cambia lo
-   que guarda o envía, hay que cambiar también privacidad.html. */
+   Lo único que guarda es ese lugar (localStorage, clave tiempo.lugar), y solo
+   cuando el lector lo elige. No envía nada. Si cambia lo que guarda o envía,
+   hay que cambiar también privacidad.html. */
 (() => {
   'use strict';
 
@@ -29,6 +37,7 @@
   const coma = (v) => String(v).replace('.', ',');
   const llano = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   const dos = (n) => String(n).padStart(2, '0');
+  const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const params = new URLSearchParams(location.search);
 
   // Escala de temperatura (°C → color) y categorías de lluvia (mm en el día)
@@ -56,9 +65,10 @@
   let E = null;          // la emisión: {fecha, pasada_texto, dias: [...], enlace}
   let D = null;          // el día que se ve (uno de E.dias)
   let activo = 0;        // su índice en E.dias
-  let vistaFicha = 'horas';
   let vista = params.get('vista') === 'lluvia' ? 'lluvia' : 'temp';
-  let ciudad = 'Madrid';
+  // El lugar que se ve: una ciudad {nombre, ciudad} o un municipio
+  // {nombre, provincia, zona, celda, corr, pos}.
+  let lugar = { nombre: 'Madrid', ciudad: 'Madrid' };
   let circulos = [];
   const svg = $('mapa');
   const capa = el('g');
@@ -71,10 +81,10 @@
     return r.json();
   }
 
-  function hoy() {
-    const d = new Date();
+  function fechaLocal(d) {
     return `${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())}`;
   }
+  const hoy = () => fechaLocal(new Date());
 
   /** La fecha pedida en la dirección o, sin ella, hoy, la siguiente que haya o la última. */
   async function elegirFecha() {
@@ -89,6 +99,57 @@
     return { fecha: fechas[fechas.length - 1], vieja: true };
   }
 
+  // Municipios (se descargan la primera vez que se toca el buscador) y zonas
+  let municipios = null;
+  let cargaMunicipios = null;
+  function cargarMunicipios() {
+    if (!cargaMunicipios) {
+      cargaMunicipios = leer('municipios.json').then((j) => {
+        const i = Object.fromEntries(j.campos.map((c, k) => [c, k]));
+        municipios = j.lista.map((m) => ({
+          nombre: m[i.nombre], provincia: m[i.provincia], zona: m[i.zona], celda: m[i.celda],
+          corr: m[i.corr], pos: m[i.x] === null ? null : [m[i.x], m[i.y]], ciudad: m[i.ciudad] || null,
+          clave: llano(m[i.nombre]),
+        }));
+        return municipios;
+      }).catch(() => { cargaMunicipios = null; return null; });
+    }
+    return cargaMunicipios;
+  }
+
+  const zonas = new Map();          // zona → archivo de la zona, o null si no está
+  async function cargarZona(zona) {
+    if (!zonas.has(zona)) {
+      try { zonas.set(zona, await leer(`datos/${E.fecha}/z/${zona}.json`)); } catch (e) { zonas.set(zona, null); }
+    }
+    return zonas.get(zona);
+  }
+
+  /** De la celda compacta (ver celda_dia en el generador) a la ficha, ya corregida por altitud. */
+  function fichaCelda(c, corr, horas) {
+    const max = c[0] + corr, min = c[1] + corr;
+    const rango = (v, a, b) => (a === null ? null
+      : [Math.min(Math.round(v - a), Math.round(v)), Math.max(Math.round(v + b), Math.round(v))]);
+    return {
+      max: Math.round(max), min: Math.round(min), lluvia: c[2],
+      max_dif: c[3], min_dif: c[4],
+      max_rango: rango(max, c[5], c[6]), min_rango: rango(min, c[7], c[8]),
+      seguridad: { a: 'alta', m: 'media', b: 'baja' }[c[9]] || null,
+      prob_lluvia: c[10], prob_lluvia_fuerte: c[11],
+      horas: horas.map((h, i) => [h, c[12][i] === null ? null : Math.round(c[12][i] + corr), c[13][i], c[14][i]]),
+    };
+  }
+
+  /** La ficha del lugar elegido en el día k de la emisión (null si no hay datos). */
+  function fichaDe(k) {
+    if (lugar.ciudad) return E.dias[k].ciudades[lugar.ciudad] || null;
+    const z = zonas.get(lugar.zona);
+    const dias = z && z.celdas[String(lugar.celda)];
+    return dias && dias[k] ? fichaCelda(dias[k], lugar.corr, z.horas[k]) : null;
+  }
+
+  const posLugar = () => (lugar.ciudad ? M.ciudades[lugar.ciudad] : lugar.pos) || null;
+
   // --- Mapa ------------------------------------------------------------
   function montarMapa() {
     svg.setAttribute('viewBox', `0 0 ${M.ancho} ${M.alto}`);
@@ -102,21 +163,21 @@
     });
   }
 
-  function valorCiudad(nombre) {
-    const f = D.ciudades[nombre];
+  function valor(f) {
+    if (!f) return '';
     if (vista === 'lluvia') return f.lluvia >= 0.5 ? `${Math.round(f.lluvia)} mm` : '';
     return `${f.max}°`;
   }
 
-  function rotulo(nombre, lado) {
-    const [x, y] = M.ciudades[nombre];
+  const CORTOS = { 'Santa Cruz de Tenerife': 'S. C. Tenerife', 'Santiago de Compostela': 'Santiago',
+                   'Jerez de la Frontera': 'Jerez' };
+
+  function rotulo(nombre, [x, y], texto, lado) {
     const pos = { der: [x + 7, y + 5, 'start'], izq: [x - 7, y + 5, 'end'], abajo: [x, y + 19, 'middle'] }[lado];
     const t = el('text', { x: pos[0], y: pos[1], 'text-anchor': pos[2] });
-    const corto = { 'Santa Cruz de Tenerife': 'S. C. Tenerife', 'Santiago de Compostela': 'Santiago',
-                    'Jerez de la Frontera': 'Jerez' }[nombre] || nombre;
-    t.append(document.createTextNode(`${corto} `));
+    t.append(document.createTextNode(`${CORTOS[nombre] || nombre} `));
     const v = el('tspan', { class: 'valor' });
-    v.textContent = valorCiudad(nombre);
+    v.textContent = texto;
     t.append(v);
     capaTexto.append(t);
   }
@@ -137,12 +198,14 @@
       if (!M.ciudades[nombre] || !D.ciudades[nombre]) continue;
       const [x, y] = M.ciudades[nombre];
       capaTexto.append(el('circle', { cx: x, cy: y, r: 2.4, fill: '#10161D' }));
-      rotulo(nombre, lado);
+      rotulo(nombre, [x, y], valor(D.ciudades[nombre]), lado);
     }
-    const pos = M.ciudades[ciudad];
+    const pos = posLugar();
     if (pos) {
       capaTexto.append(el('circle', { class: 'anillo', cx: pos[0], cy: pos[1], r: 7 }));
-      if (!(ciudad in M.etiquetas)) rotulo(ciudad, pos[0] > M.ancho * 0.7 ? 'izq' : 'der');
+      if (!(lugar.ciudad && lugar.ciudad in M.etiquetas)) {
+        rotulo(lugar.ciudad || lugar.nombre, pos, valor(fichaDe(activo)), pos[0] > M.ancho * 0.7 ? 'izq' : 'der');
+      }
     }
     leyenda();
   }
@@ -164,9 +227,9 @@
     L.innerHTML = `<span>Máxima</span><div class="rampa" style="background:linear-gradient(90deg,${grad})">${marcas}</div>`;
   }
 
-  // --- Ciudad ----------------------------------------------------------
+  // --- Ficha -------------------------------------------------------------
   function nota(dif) {
-    if (dif === null) return ['Sin referencia en Canarias', ''];
+    if (dif === null || dif === undefined) return ['Sin referencia en Canarias', ''];
     if (dif >= 1) return [`${dif}° más de lo normal`, 'calor'];
     if (dif <= -1) return [`${-dif}° menos de lo normal`, 'frio'];
     return ['Lo normal para la fecha', ''];
@@ -187,8 +250,9 @@
   }
 
   function panel() {
-    const f = D.ciudades[ciudad];
-    $('buscar').value = ciudad;
+    const f = fichaDe(activo);
+    $('buscar').value = lugar.nombre;
+    if (!f) return;
     $('vmax').textContent = `${f.max}°`;
     $('vmin').textContent = `${f.min}°`;
     for (const [id, dif] of [['nmax', f.max_dif], ['nmin', f.min_dif]]) {
@@ -197,7 +261,7 @@
       $(id).className = `nota ${cls}`;
     }
     $('lluvia').innerHTML = textoLluvia(f);
-    if (f.seguridad) {
+    if (f.seguridad && f.max_rango) {
       const [a, b] = f.max_rango;
       const rango = a === b ? `máxima de ${a}°` : `máxima entre ${a} y ${b}°`;
       $('seguridad').innerHTML = `<i class="${f.seguridad}"></i>Seguridad ${f.seguridad}: ${rango}`;
@@ -212,7 +276,7 @@
       } else if (mm !== null && mm >= 0.1) {
         ancho = Math.min(100, mm * 20); txt = `${coma(mm)} mm`; nada = '';
       }
-      return `<li><span>${h} h</span><span class="t">${t}°</span>`
+      return `<li><span>${h} h</span><span class="t">${t === null ? '—' : `${t}°`}</span>`
         + `<span class="barra-p"><b style="width:${ancho}%"></b></span>`
         + `<span class="p${nada}">${txt}</span></li>`;
     }).join('');
@@ -220,9 +284,6 @@
   }
 
   // --- Próximos días ---------------------------------------------------------
-  function fechaLocal(d) {
-    return `${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())}`;
-  }
   /** «Hoy» o «Mañana» según la fecha del aparato del lector; si no, «sáb 21». */
   function etiquetaDia(dia) {
     const h = new Date();
@@ -238,7 +299,7 @@
     document.querySelector('.ficha-vista').hidden = E.dias.length < 2;
     const cab = '<li class="cabecera"><span>Día</span><span>Máx.</span><span>Mín.</span><span>Lluvia</span></li>';
     $('dias').innerHTML = cab + E.dias.map((dia, k) => {
-      const f = dia.ciudades[ciudad];
+      const f = fichaDe(k);
       if (!f) return '';
       const p = f.prob_lluvia;
       const lluvia = p === null ? (f.lluvia >= 1 ? `${Math.round(f.lluvia)} mm` : '—') : `${p} %`;
@@ -257,7 +318,7 @@
 
   /** Cambia todo el módulo (mapa, titular, cajas y tabla por horas) a otro día. */
   function elegirDia(k) {
-    if (!E.dias[k] || !E.dias[k].ciudades[ciudad]) return;
+    if (!E.dias[k] || !fichaDe(k)) return;
     activo = k;
     D = E.dias[k];
     cabecera();
@@ -266,81 +327,156 @@
   }
 
   function mostrarFicha(cual) {
-    vistaFicha = cual;
     document.querySelectorAll('.ficha-vista button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.ficha === cual)));
     $('horas').hidden = cual !== 'horas';
     $('dias').hidden = cual !== 'dias';
   }
 
+  // --- Elegir lugar ----------------------------------------------------------
+  function avisoLugar(texto) {
+    $('aviso-lugar').textContent = texto || '';
+    $('aviso-lugar').hidden = !texto;
+  }
+
+  function ciudadCercana(pos) {
+    let mejor = 'Madrid', dist = Infinity;
+    for (const [nombre, p] of Object.entries(M.ciudades)) {
+      if (!p || !D.ciudades[nombre] || !pos) continue;
+      const d = Math.hypot(p[0] - pos[0], p[1] - pos[1]);
+      if (d < dist) { mejor = nombre; dist = d; }
+    }
+    return mejor;
+  }
+
+  /** Pone un lugar (sin pintar). Devuelve false si no hay con qué mostrarlo. */
+  async function ponerLugar(m) {
+    avisoLugar('');
+    if (m.ciudad && D.ciudades[m.ciudad]) {
+      lugar = { nombre: m.nombre || m.ciudad, ciudad: m.ciudad };
+      return true;
+    }
+    if (m.zona === undefined) return false;
+    const z = await cargarZona(m.zona);
+    if (z && z.celdas[String(m.celda)]) {
+      lugar = { nombre: m.nombre, provincia: m.provincia, zona: m.zona, celda: m.celda, corr: m.corr, pos: m.pos };
+      return true;
+    }
+    const c = ciudadCercana(m.pos);
+    lugar = { nombre: c, ciudad: c };
+    avisoLugar(`Sin datos de ${m.nombre} en esta fecha: se ve ${c}, la ciudad más cercana`);
+    return true;
+  }
+
   /** Elección del lector (buscador o mapa): se recuerda para la próxima vez. */
-  function elegir(nombre) {
-    if (!D.ciudades[nombre]) return;
-    ciudad = nombre;
-    recordar(nombre);
+  async function elegir(m) {
+    if (!(await ponerLugar(m))) return;
+    recordar(m);
     panel();
     pintar();
   }
 
-  // --- Ciudad recordada y zona horaria -------------------------------------
+  // --- Lugar recordado y zona horaria ----------------------------------------
   // En un iframe de otro sitio el almacenamiento puede estar bloqueado o
   // borrarse (Safari lo limita): nada de esto puede romper el módulo.
-  const CLAVE = 'tiempo.ciudad';
-  function recordada() {
-    try { return localStorage.getItem(CLAVE); } catch (e) { return null; }
+  const CLAVE = 'tiempo.lugar';
+  function recordado() {
+    try {
+      const j = localStorage.getItem(CLAVE);
+      if (j) return JSON.parse(j);
+      const viejo = localStorage.getItem('tiempo.ciudad');    // la primera versión guardaba solo la ciudad
+      return viejo ? { nombre: viejo } : null;
+    } catch (e) { return null; }
   }
-  function recordar(nombre) {
-    try { localStorage.setItem(CLAVE, nombre); } catch (e) { /* sin almacenamiento */ }
+  function recordar(m) {
+    try { localStorage.setItem(CLAVE, JSON.stringify({ nombre: m.nombre || m.ciudad, provincia: m.provincia || null })); } catch (e) { /* sin almacenamiento */ }
   }
   function horaDeCanarias() {
     try { return Intl.DateTimeFormat().resolvedOptions().timeZone === 'Atlantic/Canary'; } catch (e) { return false; }
   }
 
-  /** Ciudad con la que abre: la de la dirección, la recordada, Las Palmas o Madrid. */
-  function ciudadInicial() {
-    const existe = (n) => n && nombres.find((x) => llano(x) === llano(n));
-    return existe(params.get('ciudad'))
-      || existe(recordada())
-      || (horaDeCanarias() && D.ciudades['Las Palmas'] ? 'Las Palmas' : null)
-      || (D.ciudades.Madrid ? 'Madrid' : nombres[0]);
+  /** Busca un lugar por nombre: primero entre las ciudades, luego entre los municipios. */
+  async function buscarLugar(nombre, provincia) {
+    if (!nombre) return null;
+    const ciudad = Object.keys(D.ciudades).find((c) => llano(c) === llano(nombre));
+    if (ciudad) return { nombre: ciudad, ciudad };
+    const lista = await cargarMunicipios();
+    if (!lista) return null;
+    const q = llano(nombre);
+    return lista.find((m) => m.clave === q && (!provincia || m.provincia === provincia))
+      || lista.find((m) => m.clave.split('/').some((p) => p.trim() === q)) || null;
+  }
+
+  /** Lugar con el que abre: el de la dirección, el recordado, Las Palmas o Madrid. */
+  async function lugarInicial() {
+    const guardado = recordado();
+    for (const [n, p] of [[params.get('ciudad'), null], [guardado && guardado.nombre, guardado && guardado.provincia]]) {
+      const m = await buscarLugar(n, p);
+      if (m && (await ponerLugar(m))) return;
+    }
+    const c = horaDeCanarias() && D.ciudades['Las Palmas'] ? 'Las Palmas' : (D.ciudades.Madrid ? 'Madrid' : Object.keys(D.ciudades)[0]);
+    lugar = { nombre: c, ciudad: c };
   }
 
   // --- Buscador --------------------------------------------------------
   const buscar = $('buscar'), sug = $('sugerencias');
-  let nombres = [];
+  let opciones = [];
   let activa = 0;
+
+  /** Hasta 8 lugares que casan: primero los que empiezan así (por población), luego los que lo contienen. */
+  function candidatos(q) {
+    if (!municipios) {
+      const ciudades = Object.keys(D.ciudades).sort((a, b) => a.localeCompare(b, 'es'));
+      return ciudades.filter((c) => !q || llano(c).includes(q)).slice(0, 8).map((c) => ({ nombre: c, ciudad: c }));
+    }
+    if (!q) return municipios.slice(0, 8);
+    const empieza = [], contiene = [];
+    for (const m of municipios) {
+      if (m.clave.startsWith(q) || m.clave.split(/[/ -]/).some((p) => p.startsWith(q))) empieza.push(m);
+      else if (m.clave.includes(q)) contiene.push(m);
+      if (empieza.length >= 8) break;
+    }
+    return empieza.concat(contiene).slice(0, 8);
+  }
+
   function sugerir() {
-    const q = llano(buscar.value.trim());
-    const lista = (q ? nombres.filter((n) => llano(n).includes(q)) : nombres).slice(0, 8);
+    opciones = candidatos(llano(buscar.value.trim()));
     activa = 0;
-    sug.innerHTML = lista.map((n, i) => `<li role="option" data-n="${n}" class="${i === 0 ? 'activa' : ''}">${n}</li>`).join('')
-      || '<li class="vacio">No está en la lista</li>';
+    sug.innerHTML = opciones.map((m, i) => `<li role="option" data-i="${i}" class="${i === 0 ? 'activa' : ''}">`
+      + `${esc(m.nombre)}${m.provincia ? `<small>${esc(m.provincia)}</small>` : ''}</li>`).join('')
+      || `<li class="vacio">${municipios ? 'No está en la lista' : 'Cargando municipios…'}</li>`;
     sug.hidden = false;
   }
-  function cerrar() { sug.hidden = true; buscar.value = ciudad; buscar.blur(); }
-  buscar.addEventListener('focus', () => { buscar.select(); sugerir(); });
+  function cerrar() { sug.hidden = true; buscar.value = lugar.nombre; buscar.blur(); }
+  buscar.addEventListener('focus', () => {
+    buscar.select();
+    sugerir();
+    cargarMunicipios().then(() => { if (document.activeElement === buscar) sugerir(); });
+  });
   buscar.addEventListener('input', sugerir);
   buscar.addEventListener('keydown', (e) => {
-    const items = [...sug.querySelectorAll('li[data-n]')];
+    const items = [...sug.querySelectorAll('li[data-i]')];
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       activa = (activa + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % Math.max(1, items.length);
       items.forEach((li, i) => li.classList.toggle('activa', i === activa));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (items[activa]) elegir(items[activa].dataset.n);
+      const m = opciones[activa];
       cerrar();
+      if (m) elegir(m);
     } else if (e.key === 'Escape') {
       cerrar();
     }
   });
   sug.addEventListener('pointerdown', (e) => {
-    const li = e.target.closest('li[data-n]');
+    const li = e.target.closest('li[data-i]');
     if (!li) return;
     e.preventDefault();
-    elegir(li.dataset.n);
+    const m = opciones[Number(li.dataset.i)];
     cerrar();
+    if (m) elegir(m);
   });
-  buscar.addEventListener('blur', () => setTimeout(() => { sug.hidden = true; buscar.value = ciudad; }, 150));
+  buscar.addEventListener('blur', () => setTimeout(() => { sug.hidden = true; buscar.value = lugar.nombre; }, 150));
 
   // --- Arranque ----------------------------------------------------------
   function fallo(texto) {
@@ -370,11 +506,10 @@
       fallo(params.get('d') ? 'No hay previsión guardada para esa fecha.' : 'No se ha podido cargar la previsión.');
       return;
     }
-    nombres = Object.keys(D.ciudades).sort((a, b) => a.localeCompare(b, 'es'));
-    ciudad = ciudadInicial();
+    await lugarInicial();
 
     cabecera();
-    $('pie').textContent = `Datos: ECMWF (CC BY 4.0) · Lo normal: ERA5 1991-2020 (Copernicus) · Pasada de las ${E.pasada_texto}`;
+    $('pie').textContent = `ECMWF (CC BY 4.0) · Normal 1991-2020: ERA5, Copernicus · Municipios: NGMEP CC-BY 4.0 ign.es · Pasada de las ${E.pasada_texto}`;
     if (E.enlace && E.enlace.url) {
       const a = document.createElement('a');
       a.href = E.enlace.url;
@@ -422,7 +557,7 @@
       const d = Math.hypot(pos[0] - p.x, pos[1] - p.y);
       if (d < dist) { mejor = nombre; dist = d; }
     }
-    if (mejor) elegir(mejor);
+    if (mejor) elegir({ nombre: mejor, ciudad: mejor });
   });
 
   arrancar();

@@ -510,11 +510,20 @@ def titular(fichas: dict[str, dict], valores: dict[str, dict], canarias: set[str
 # Documento de cada día y emisión
 # ---------------------------------------------------------------------------
 
-def cargar_tablas() -> tuple[list[dict], list]:
-    """Ciudades (con su celda, corrección y normales) y celdas de los puntos del mapa."""
+def cargar_tablas() -> tuple[list[dict], list, list[dict]]:
+    """Ciudades, celdas de los puntos del mapa y celdas de los municipios.
+
+    Las de los municipios (datos_fijos/celdas.json, de herramientas/
+    preparar_tablas.py) llevan su zona y sus normales; si aún no existen, el
+    módulo funciona solo con las ciudades.
+    """
     ciudades = json.loads((FIJOS / "ciudades.json").read_text(encoding="utf-8"))["ciudades"]
     celdas = json.loads((FIJOS / "puntos.json").read_text(encoding="utf-8"))["celdas"]
-    return ciudades, celdas
+    try:
+        zonas = json.loads((FIJOS / "celdas.json").read_text(encoding="utf-8"))["celdas"]
+    except FileNotFoundError:
+        zonas = []
+    return ciudades, celdas, zonas
 
 
 _DIAS_CORTOS = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"]
@@ -560,6 +569,48 @@ def documento_dia(dia: date, prev: Prevision, ens: dict | None, ciudades: list[d
     }
 
 
+_SEGURIDAD = {"alta": "a", "media": "m", "baja": "b"}
+
+
+def celda_dia(k: int, prev: Prevision, ens: dict | None, normal: tuple | None) -> list:
+    """La previsión de una celda en un día, en forma compacta (sin corregir por altitud).
+
+    [máx, mín, lluvia, dif. máx, dif. mín, horquilla de la máx (bajo, alto),
+     de la mín (bajo, alto), seguridad, prob. de lluvia, prob. de lluvia fuerte,
+     temperaturas cada 3 h, probabilidades cada 3 h, litros cada 3 h]
+
+    La horquilla va como distancias al valor central (p50 − p10 y p90 − p50):
+    así la página la aplica a la temperatura ya corregida de cada municipio. La
+    diferencia con lo normal es celda contra celda, igual para todos los
+    municipios de la celda.
+    """
+    def r1(v):
+        return None if v is None or np.isnan(v) else round(float(v), 1)
+
+    x = float(prev.ciudades["max"][k])
+    n = float(prev.ciudades["min"][k])
+    dif_x = None if normal is None else round(x - normal[0])
+    dif_n = None if normal is None else round(n - normal[1])
+    horq, seg, prob, prob_f = [None] * 4, None, None, None
+    probs = [None] * len(prev.horas)
+    if ens is not None:
+        qx = np.nanpercentile(ens["max"][:, k], [10, 50, 90])
+        qn = np.nanpercentile(ens["min"][:, k], [10, 50, 90])
+        horq = [r1(qx[1] - qx[0]), r1(qx[2] - qx[1]), r1(qn[1] - qn[0]), r1(qn[2] - qn[1])]
+        seg = _SEGURIDAD[confianza(max(qx[2] - qx[0], qn[2] - qn[0]))]
+        prob = int(round(100 * np.mean(ens["lluvia"][:, k] >= LLUVIA_MIN)))
+        prob_f = int(round(100 * np.mean(ens["lluvia"][:, k] >= LLUVIA_FUERTE)))
+        franjas = ens["franjas"][:, :, k]
+        probs = [None if np.all(np.isnan(franjas[:, h]))
+                 else int(round(100 * np.mean(franjas[:, h] >= LLUVIA_FRANJA)))
+                 for h in range(franjas.shape[1])]
+    return [r1(x), r1(n), r1(prev.ciudades["lluvia"][k]), dif_x, dif_n,     # 0-4
+            *horq, seg, prob, prob_f,                                        # 5-11
+            [r1(t) for t in prev.horas_t[:, k]],                             # 12
+            probs,                                                           # 13
+            [r1(mm) for mm in prev.horas_mm[:, k]]]                          # 14
+
+
 def emision(primer: date, run: datetime, dias: list[dict]) -> dict:
     """El JSON de una emisión: el día del shot y los siguientes, de una misma pasada."""
     return {
@@ -600,13 +651,17 @@ def generar_emision(primer: date, pasada: datetime | None = None, salida: Path =
         candidatas = [r for r in pasadas_candidatas(primer) if publicada(r)]
     if not candidatas:
         raise ValueError(f"Ninguna pasada publicada cubre el {primer:%d/%m/%Y}.")
+    ciudades, celdas, zonas = cargar_tablas()
+    carpeta_zonas = salida / f"{primer:%Y-%m-%d}" / "z"
     previa = pasada_de(destino)
-    if not forzar and previa is not None and previa >= candidatas[0]:
+    completa = not zonas or carpeta_zonas.is_dir()
+    if not forzar and completa and previa is not None and previa >= candidatas[0]:
         logger.info(f"{destino.name}: ya está con la pasada de las {previa:%H} UTC del "
                     f"{previa:%d/%m}; no hay nada nuevo")
         return destino
-    ciudades, celdas = cargar_tablas()
-    nodos = [c["nodo"] for c in ciudades]
+    # Se extrae a la vez en las ciudades y en las celdas de los municipios.
+    nodos = [c["nodo"] for c in ciudades] + [[z["lat"], z["lon"]] for z in zonas]
+    n_c = len(ciudades)
     error = None
     for run in candidatas:
         try:
@@ -618,7 +673,7 @@ def generar_emision(primer: date, pasada: datetime | None = None, salida: Path =
     else:
         raise RuntimeError(f"No hay ninguna pasada disponible para el {primer:%d/%m}: {error}")
 
-    dias = []
+    dias, celdas_dias, horas_dias = [], [], []
     for k in range(n_dias):
         d = primer + timedelta(days=k)
         try:
@@ -632,12 +687,55 @@ def generar_emision(primer: date, pasada: datetime | None = None, salida: Path =
             break
         ens = ensemble(run, d, nodos) if con_ensemble else None
         dias.append(documento_dia(d, prev, ens, ciudades))
+        doy = dia_del_ano(d)
+        celdas_dias.append([
+            celda_dia(n_c + j, prev, ens,
+                      None if z.get("normal_max") is None else (z["normal_max"][doy], z["normal_min"][doy]))
+            for j, z in enumerate(zonas)])
+        horas_dias.append(prev.horas)
         logger.info(f"  {d}: {dias[-1]['titular']}")
     doc = emision(primer, run, dias)
     salida.mkdir(parents=True, exist_ok=True)
+    if zonas:
+        escribir_zonas(carpeta_zonas, primer, run, zonas, horas_dias, celdas_dias)
     destino.write_text(json.dumps(doc, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     logger.info(f"{destino.name}: {len(dias)} días (pasada {doc['pasada_texto']})")
     return destino
+
+
+def escribir_zonas(carpeta: Path, primer: date, run: datetime, zonas: list[dict],
+                   horas_dias: list[list[int]], celdas_dias: list[list[list]]) -> None:
+    """Un archivo por zona de 2° × 2° con sus celdas: lo que la página descarga al elegir un municipio."""
+    if carpeta.exists():
+        shutil.rmtree(carpeta)
+    carpeta.mkdir(parents=True)
+    por_zona: dict[str, dict] = {}
+    for j, z in enumerate(zonas):
+        por_zona.setdefault(z["zona"], {})[str(j)] = [dia[j] for dia in celdas_dias]
+    for zona, celdas in por_zona.items():
+        (carpeta / f"{zona}.json").write_text(json.dumps({
+            "fecha": primer.isoformat(), "pasada": run.strftime("%Y-%m-%dT%H:00Z"),
+            "horas": horas_dias, "celdas": celdas,
+        }, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    logger.info(f"  {len(por_zona)} zonas con {len(zonas)} celdas de municipios")
+
+
+DIAS_ZONAS = 14     # los archivos por zona se guardan dos semanas; las emisiones, siempre
+
+
+def podar_zonas(salida: Path = DATOS, hoy: date | None = None) -> None:
+    """Borra los archivos por zona de emisiones de hace más de DIAS_ZONAS días.
+
+    Los shots antiguos siguen funcionando con las 59 ciudades de la emisión;
+    al elegir otro municipio, la página usa la ciudad más cercana.
+    """
+    hoy = hoy or datetime.now(TZ).date()
+    for carpeta in salida.glob("????-??-??"):
+        try:
+            if carpeta.is_dir() and (hoy - date.fromisoformat(carpeta.name)).days > DIAS_ZONAS:
+                shutil.rmtree(carpeta)
+        except ValueError:
+            continue
 
 
 def escribir_indice(salida: Path = DATOS) -> Path:
@@ -711,5 +809,6 @@ def generar(primeros: list[date] | None = None, pasada: datetime | None = None,
         except Exception as e:     # noqa: BLE001
             logger.error(f"{d}: {e}")
     escribir_indice()
+    podar_zonas()
     limpiar_cache()
     return hechos

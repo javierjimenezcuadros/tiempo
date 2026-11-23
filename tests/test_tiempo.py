@@ -190,7 +190,7 @@ def test_documento_dia_sin_red():
 
 
 def test_emision_de_seis_dias_sin_red(tmp_path, monkeypatch):
-    monkeypatch.setattr(t, "cargar_tablas", lambda: (CIUDADES_PRUEBA, [[40.5, -3.75], [28.0, -15.75]]))
+    monkeypatch.setattr(t, "cargar_tablas", lambda: (CIUDADES_PRUEBA, [[40.5, -3.75], [28.0, -15.75]], []))
     pedidos = []
     monkeypatch.setattr(t, "determinista", lambda run, d, c, n: pedidos.append(d) or _prevision(run))
     monkeypatch.setattr(t, "ensemble", lambda run, d, n: None)
@@ -235,6 +235,7 @@ def test_ultima_pasada_publicada_salta_las_que_faltan():
 def test_no_pisa_una_emision_igual_o_mas_nueva(tmp_path, monkeypatch):
     import json
     (tmp_path / "2026-11-21.json").write_text(json.dumps({"pasada": "2026-11-21T00:00Z"}))
+    monkeypatch.setattr(t, "cargar_tablas", lambda: (CIUDADES_PRUEBA, [], []))
     monkeypatch.setattr(t, "determinista", lambda *a: pytest.fail("no debía descargar nada"))
     ruta = t.generar_emision(date(2026, 11, 21), datetime(2026, 11, 20, 12), salida=tmp_path)
     assert json.loads(ruta.read_text())["pasada"] == "2026-11-21T00:00Z"
@@ -273,7 +274,7 @@ def test_indice_sin_cambios_no_se_reescribe(tmp_path):
 
 
 def test_tablas_del_repositorio_coinciden():
-    ciudades, celdas = t.cargar_tablas()
+    ciudades, celdas, zonas = t.cargar_tablas()
     import json
     mapa = json.loads((t.SITIO / "mapa.json").read_text(encoding="utf-8"))
     assert len(mapa["puntos"]) == len(celdas)
@@ -288,3 +289,64 @@ def test_por_paso_usa_el_eje_de_pasos():
     assert out[6].shape == (3, 4) and out[6][0, 0] == 12 and out[0].sum() == 0
     ens = np.arange(5 * 2 * 3 * 4).reshape(5, 2, 3, 4).astype(float)   # (escenario, paso, lat, lon)
     assert t._por_paso(ens, [3, 6], [3, 6])[6].shape == (5, 3, 4)
+
+
+ZONAS_PRUEBA = [
+    {"lat": 40.25, "lon": -3.5, "zona": "40_-4", "normal_max": [10.0] * 366, "normal_min": [2.0] * 366},
+    {"lat": 28.0, "lon": -16.5, "zona": "28_-18", "normal_max": None, "normal_min": None},
+]
+
+
+def _prevision_con_celdas(run=datetime(2026, 11, 20, 0)):
+    # Dos ciudades y luego las dos celdas de municipios, en el mismo orden que los nodos.
+    return t.Prevision(
+        run=run, horas=[1, 4],
+        puntos={"max": np.array([12.6]), "min": np.array([5.0]), "lluvia": np.array([0.0])},
+        ciudades={"max": np.array([12.8, 23.9, 14.26, 21.0]), "min": np.array([7.8, 19.5, 3.0, 17.0]),
+                  "lluvia": np.array([5.0, 0.0, 2.34, 0.0])},
+        horas_t=np.array([[9.0, 20.0, 4.04, 18.0], [9.0, 20.0, 5.0, 18.0]]),
+        horas_mm=np.array([[np.nan, np.nan, np.nan, np.nan], [0.1, 0.0, 0.5, 0.0]]),
+    )
+
+
+def test_celda_dia_compacta():
+    prev = _prevision_con_celdas()
+    ens = {"max": np.tile(np.linspace(13, 16, 50)[:, None], (1, 4)),
+           "min": np.tile(np.linspace(2, 4, 50)[:, None], (1, 4)),
+           "lluvia": np.tile(np.r_[np.zeros(25), np.full(25, 12.0)][:, None], (1, 4)),
+           "franjas": np.tile(np.r_[np.zeros(40), np.full(10, 1.0)][:, None, None], (1, 2, 4))}
+    fila = t.celda_dia(2, prev, ens, (10.0, 2.0))
+    assert fila[:5] == [14.3, 3.0, 2.3, 4, 1]          # máx, mín, lluvia, difs con la normal
+    assert fila[9:12] == ["a", 50, 50]                 # seguridad alta, probabilidades
+    assert fila[12] == [4.0, 5.0] and fila[13] == [20, 20] and fila[14] == [None, 0.5]
+    sin = t.celda_dia(3, prev, None, None)
+    assert sin[3:12] == [None] * 9 and sin[13] == [None, None]
+
+
+def test_emision_escribe_las_zonas(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(t, "cargar_tablas", lambda: (CIUDADES_PRUEBA, [[40.5, -3.75]], ZONAS_PRUEBA))
+    nodos_pedidos = []
+    monkeypatch.setattr(t, "determinista",
+                        lambda run, d, c, n: nodos_pedidos.append(len(n)) or _prevision_con_celdas(run))
+    monkeypatch.setattr(t, "ensemble", lambda run, d, n: None)
+    t.generar_emision(date(2026, 11, 20), datetime(2026, 11, 20, 0), salida=tmp_path, n_dias=2)
+    assert nodos_pedidos == [4, 4]                     # 2 ciudades + 2 celdas
+    z = json.loads((tmp_path / "2026-11-20" / "z" / "40_-4.json").read_text())
+    assert z["horas"] == [[1, 4], [1, 4]] and list(z["celdas"]) == ["0"]
+    assert len(z["celdas"]["0"]) == 2 and z["celdas"]["0"][0][:5] == [14.3, 3.0, 2.3, 4, 1]
+    assert (tmp_path / "2026-11-20" / "z" / "28_-18.json").exists()
+    # Con la emisión al día pero sin la carpeta de zonas, se rehace.
+    import shutil
+    shutil.rmtree(tmp_path / "2026-11-20")
+    t.generar_emision(date(2026, 11, 20), datetime(2026, 11, 20, 0), salida=tmp_path, n_dias=2)
+    assert (tmp_path / "2026-11-20" / "z" / "40_-4.json").exists()
+
+
+def test_podar_zonas(tmp_path):
+    for f in ("2026-11-01", "2026-11-20"):
+        (tmp_path / f / "z").mkdir(parents=True)
+    (tmp_path / "2026-11-01.json").write_text("{}")
+    t.podar_zonas(tmp_path, hoy=date(2026, 11, 23))
+    assert not (tmp_path / "2026-11-01").exists() and (tmp_path / "2026-11-20").exists()
+    assert (tmp_path / "2026-11-01.json").exists()     # la emisión se queda siempre

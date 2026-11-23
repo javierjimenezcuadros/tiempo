@@ -119,6 +119,8 @@ body {
 .sugerencias li { padding: 6px 10px; font-size: 14px; cursor: pointer; }
 .sugerencias li:hover, .sugerencias li.activa { background: var(--papel); }
 .sugerencias li.vacio { color: var(--tinta-suave); cursor: default; }
+.sugerencias li small { margin-left: 6px; font-size: 11px; color: var(--tinta-suave); }
+.aviso-lugar { margin: -2px 0 0; font-size: 11px; line-height: 1.25; color: var(--calor); }
 
 .cajas { display: flex; gap: 8px; }
 .caja {

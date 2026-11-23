@@ -21,14 +21,14 @@
 <body>
 <main>
   <h1>Privacidad del módulo del tiempo</h1>
-  <p class="fecha">Actualizado el 20 de noviembre de 2026</p>
+  <p class="fecha">Actualizado el 23 de noviembre de 2026</p>
 
   <h2>Qué guarda</h2>
-  <p>Solo una cosa: el nombre de la última ciudad que elegiste en el buscador o en
-  el mapa, para que la próxima vez el módulo se abra en ella. Se guarda en el
-  almacenamiento local de tu navegador (con el nombre <code>tiempo.ciudad</code>),
-  no sale de él y no se usa para nada más. Si no eliges ninguna ciudad, no se
-  guarda nada. Se borra borrando los datos de navegación; algunos navegadores,
+  <p>Solo una cosa: el nombre de la última ciudad o municipio que elegiste en el
+  buscador o en el mapa (y su provincia), para que la próxima vez el módulo se
+  abra ahí. Se guarda en el almacenamiento local de tu navegador (con el nombre
+  <code>tiempo.lugar</code>), no sale de él y no se usa para nada más. Si no
+  eliges ningún lugar, no se guarda nada. Se borra borrando los datos de navegación; algunos navegadores,
   como Safari, también lo borran solos al cabo de un tiempo.</p>
 
   <h2>Qué mira sin guardarlo</h2>
@@ -52,7 +52,14 @@
   <h2>Datos meteorológicos</h2>
   <p>La previsión es del Centro Europeo de Previsiones Meteorológicas a Plazo Medio
   (ECMWF Open Data, licencia CC BY 4.0) y lo normal para cada fecha, del
-  reanálisis ERA5 1991-2020 del servicio Copernicus.</p>
+  reanálisis ERA5 1991-2020 del servicio Copernicus. Los municipios, con sus
+  coordenadas y su altitud, son obra derivada del Nomenclátor Geográfico de
+  Municipios y Entidades de Población (NGMEP CC-BY 4.0 ign.es).</p>
+
+  <h2>Qué se descarga al buscar</h2>
+  <p>La primera vez que tocas el buscador, la página descarga del mismo servidor
+  la lista de municipios; al elegir uno, el archivo con la previsión de su zona.
+  No se envía qué buscas ni qué eliges.</p>
 </main>
 </body>
 </html>

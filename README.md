@@ -97,6 +97,26 @@ Con `?d=AAAA-MM-DD` el shot se queda con la previsión de esa semana. Con
 `&ciudad=Sevilla` abre en esa ciudad; con `&vista=lluvia`, en la pestaña de
 lluvia, y con `&ficha=dias`, con la lista de los próximos días a la vista.
 
+## Municipios
+
+El buscador encuentra los 8.132 municipios del Nomenclátor Geográfico de
+Municipios y Entidades de Población del IGN (edición 2026, en
+`datos_fijos/fuentes/`; obra derivada de NGMEP CC-BY 4.0 ign.es).
+
+- Cada municipio toma la celda del modelo más parecida (cercana, con tierra y
+  de altitud parecida), con la corrección por altitud desde la de su núcleo
+  principal (tope de ±1,5 °C; lo alcanzan unos 300 pueblos de sierra o de costa).
+  Caen en 836 celdas, repartidas en 31 zonas de 2° × 2°.
+- La emisión principal sigue llevando las 59 ciudades. La previsión de cada
+  celda va aparte, en `sitio/datos/AAAA-MM-DD/z/<zona>.json` (unos 30 KB por
+  zona), que la página solo descarga al elegir un municipio de esa zona, y le
+  aplica la corrección por altitud. La lista de municipios (`sitio/municipios.json`,
+  ~460 KB, ~100 KB comprimida) solo se descarga al tocar el buscador.
+- Los archivos por zona se guardan dos semanas; las emisiones, siempre. En un
+  shot más antiguo, al elegir un municipio se ve la ciudad más cercana, con aviso.
+- Las tablas las rehace `herramientas/preparar_tablas.py` (en el Mac, con el
+  entorno de BenBaso).
+
 ## Próximos días
 
 La ficha tiene un interruptor «Por horas | 6 días». En «6 días», una fila por
