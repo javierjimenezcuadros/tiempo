@@ -1,12 +1,15 @@
 # Genera los datos del módulo del tiempo y publica la web en Cloudflare.
 #
-# Cada dos horas mira qué pasada ha publicado ECMWF (una consulta de un
-# segundo). Si hay una nueva, genera las emisiones que tocan (unos 15 minutos);
-# si no, termina en un minuto sin tocar nada. Mirar a menudo compensa que GitHub
-# lance las tareas programadas con horas de retraso. El repositorio es público,
-# así que los minutos de GitHub Actions no tienen límite.
+# Cada vez mira qué pasada ha publicado ECMWF (una consulta de un segundo). Si
+# hay una nueva, genera las emisiones que tocan (unos 15 minutos); si no,
+# termina en un minuto sin tocar nada. El repositorio es público, así que los
+# minutos de GitHub Actions no tienen límite.
 #
-# También se lanza a mano desde la pestaña Actions de GitHub («Run workflow»).
+# Quién la lanza: cada hora, el Worker tiempo-aviso de Cloudflare (aviso/),
+# porque GitHub lanza sus tareas programadas con horas de retraso o se las
+# salta. La programación de abajo queda de respaldo. También se lanza a mano
+# desde la pestaña Actions de GitHub («Run workflow»); marcando «Solo publicar
+# la web» publica la página y el aviso sin generar datos.
 #
 # Necesita un secreto del repositorio, CLOUDFLARE_API_TOKEN: un token de
 # Cloudflare con la plantilla «Editar Cloudflare Workers» (ver README.md).
@@ -110,3 +113,11 @@ jobs:
             sleep 20
           done
           exit 1
+
+      # El aviso que lanza esta tarea cada hora (aviso/). Solo con «Solo publicar
+      # la web»: no cambia con los datos y así no se publica 24 veces al día.
+      - name: Publicar el aviso de Cloudflare
+        if: ${{ inputs.solo_publicar }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ env.CLOUDFLARE_LIMPIO }}
+        run: npx --yes wrangler@4 deploy --config aviso/wrangler.jsonc

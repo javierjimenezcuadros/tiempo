@@ -31,10 +31,20 @@ ECMWF Open Data ──► GitHub Actions (2 veces al día) ──► sitio/datos
   repositorio (así queda el archivo: cada shot con fecha conserva la semana tal
   como se dio) y publica en Cloudflare. Nunca pisa una emisión con otra de una
   pasada más antigua.
-- **Por qué cada dos horas:** GitHub lanza las tareas programadas con retraso,
-  a veces de horas. Decidir por lo que ECMWF ha publicado, y no por la hora,
-  hace que una tarea que llega tarde haga lo mismo que habría hecho a su hora.
-  El repositorio es público, así que los minutos de Actions no tienen límite. También se lanza a mano: pestaña *Actions* → *Generar el tiempo*
+- **Quién la lanza:** cada hora (a las y veinte), un Worker de Cloudflare sin
+  dirección pública, `tiempo-aviso` (carpeta `aviso/`), que le pide a GitHub
+  que la ejecute, como quien pulsa *Run workflow*. GitHub lanza sus propias
+  tareas programadas con horas de retraso o se las salta (del 21 al 24 de
+  noviembre de 2026 lanzó 9 de unas 40); las que se piden así arrancan al
+  momento. La programación de GitHub (cada dos horas) sigue puesta de
+  respaldo. Decidir por lo que ECMWF ha publicado, y no por la hora, hace que
+  dé igual quién la lance o cuándo llegue. El repositorio es público, así que
+  los minutos de Actions no tienen límite.
+- El aviso necesita el secreto `GITHUB_TOKEN` en el Worker `tiempo-aviso`
+  (Cloudflare → Workers → tiempo-aviso → Configuración → Variables y
+  secretos): un token de GitHub de grano fino, solo para este repositorio, con
+  el permiso *Actions: Read and write*. Caduca: cuando caduque, se crea otro
+  y se cambia el secreto (mientras, queda la programación de GitHub). También se lanza a mano: pestaña *Actions* → *Generar el tiempo*
   → *Run workflow*. Marcando «Solo publicar la web» no genera datos: sube la
   página tal como está en el repositorio (para cambios de diseño, en un minuto).
 - El shot de primera hora sale con la pasada de la noche anterior; a media

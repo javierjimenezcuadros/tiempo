@@ -1,0 +1,11 @@
+// Worker que lanza cada hora la tarea de GitHub (ver index.js). Sin dirección
+// pública. Se publica con «Run workflow» marcando «Solo publicar la web».
+{
+  "name": "tiempo-aviso",
+  "account_id": "1b5310d13cf8bfb869f26cfee252ca16",
+  "main": "index.js",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  "triggers": { "crons": ["20 * * * *"] },
+  "observability": { "enabled": true }
+}
