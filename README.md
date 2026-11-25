@@ -125,8 +125,23 @@ Municipios y Entidades de Población del IGN (edición 2026, en
 - **Tocar el mapa:** cada punto elige el municipio más poblado de los que caen
   en él (cada municipio cae en el punto más cercano a su núcleo; los puntos
   donde no cae ninguno toman el más cercano). Va calculado en `mapa.json`
-  («lugares»), que por eso pesa ~17 KB comprimido. Tocar el rótulo de una
-  ciudad elige esa ciudad.
+  («lugares»), que por eso pesa ~17 KB comprimido.
+- **Imán de las ciudades:** cada una de las 59 ciudades gana si se toca cerca
+  de ella: 6 px de pantalla con el dedo y 4 px con el ratón; las diez con rótulo,
+  12 y 8 px (nunca menos de 8 unidades del dibujo, porque su punto negro cae
+  entre cuatro puntos de color y solo uno es la ciudad). Si se solapan, gana la
+  de menor distancia partida por su radio. Los radios van en píxeles y no en
+  unidades porque en el móvil el mapa mide unos 150 px de alto. Con el dedo,
+  encima de un rótulo gana su ciudad, salvo justo sobre otra ciudad que el
+  rótulo tapa: A Coruña tapa Gijón y Oviedo; Barcelona, Tarragona; Bilbao, San
+  Sebastián; Madrid, Teruel; Sevilla, Granada, y Zaragoza, Soria. Moverlos no
+  sirve, porque en cualquier otro sitio tapan otra. El rótulo del lugar que se
+  ve no tapa nada.
+- **Mientras se apunta** (con el ratón encima o con el dedo apoyado), los
+  rótulos y los puntos negros se apagan y se ve el destino: un anillo y su
+  nombre, por encima del dedo. Con el ratón los rótulos no cuentan, así que
+  las ciudades tapadas se eligen sin problema. Si el dedo se desliza, la página
+  se mueve y no se elige nada.
 - **Marca de las tablas:** `preparar_tablas.py` pone la misma marca («tablas»)
   en `mapa.json`, `municipios.json` y `celdas.json`, y el generador la copia en
   cada archivo de zona. La página guarda el lugar elegido con su zona, su celda

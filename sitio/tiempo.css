@@ -83,6 +83,9 @@ body {
 #mapa text .valor { font-weight: 400; }
 #mapa .recuadro { fill: none; stroke: var(--linea); stroke-width: 1.2; }
 #mapa .anillo { fill: none; stroke: var(--tinta); stroke-width: 2.2; }
+#mapa .rotulos { transition: opacity 0.12s; }
+#mapa.apuntando .rotulos { opacity: 0.12; }       /* mientras se apunta, se ven los puntos de debajo */
+#mapa .apunta circle { fill: none; stroke: var(--tinta); pointer-events: none; }
 
 .leyenda { grid-area: ley; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--tinta-suave); min-height: 22px; }
 .rampa { flex: 1; position: relative; height: 9px; border-radius: 5px; }

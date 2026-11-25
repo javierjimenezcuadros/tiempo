@@ -78,7 +78,8 @@
   let circulos = [];
   const svg = $('mapa');
   const capa = el('g');
-  const capaTexto = el('g');
+  const capaTexto = el('g', { class: 'rotulos' });
+  const capaApunta = el('g', { class: 'apunta' });    // adónde llevaría el toque
 
   // --- Datos -----------------------------------------------------------
   async function leer(url) {
@@ -165,7 +166,7 @@
     svg.setAttribute('viewBox', `0 0 ${M.ancho} ${M.alto}`);
     const [rx, ry, rw, rh] = M.recuadro;
     svg.append(el('rect', { class: 'recuadro', x: rx - 4, y: ry - 4, width: rw + 8, height: rh + 8, rx: 6 }));
-    svg.append(capa, capaTexto);
+    svg.append(capa, capaTexto, capaApunta);
     circulos = M.puntos.map(([x, y]) => {
       const c = el('circle', { cx: x, cy: y, r: 3.1 });
       capa.append(c);
@@ -575,28 +576,129 @@
     $('modulo').setAttribute('aria-busy', 'false');
   }
 
-  // Tocar el mapa: el rótulo de una ciudad elige esa ciudad; un punto, el
-  // municipio más poblado de los que caen en él (mapa.json «lugares»).
-  svg.addEventListener('click', (e) => {
-    if (!M || !D) return;
+  // Tocar el mapa. Cada una de las 59 ciudades tiene un imán: un toque cerca de
+  // ella la elige. El de las diez con rótulo es mayor y abarca su rótulo. Fuera
+  // de los imanes, cada punto elige el municipio más poblado de los que caen en
+  // él (mapa.json «lugares»). Mientras se apunta (con el ratón encima o con el
+  // dedo apoyado), los rótulos y los puntos negros se apagan y se ve el destino:
+  // un anillo y su nombre. Los radios van en píxeles de pantalla, no del dibujo:
+  // en el móvil el mapa mide unos 150 px de alto, y con 18 px el 82 % de los
+  // puntos caía en alguna de las diez ciudades.
+  const IMAN = { touch: [12, 6], mouse: [8, 4] };       // [con rótulo, sin rótulo]
+  const MARGEN_ROTULO = 3;
+  let puntero = 'touch';
+
+  function enElDibujo(e) {
+    const ctm = svg.getScreenCTM();
     const pt = svg.createSVGPoint();
     pt.x = e.clientX; pt.y = e.clientY;
-    const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+    return { p: pt.matrixTransform(ctm.inverse()), escala: ctm.a || 1 };
+  }
+
+  const aCaja = (p, b) => Math.hypot(Math.max(b.x - p.x, 0, p.x - b.x - b.width),
+                                     Math.max(b.y - p.y, 0, p.y - b.y - b.height));
+
+  /**
+   * Qué elige un toque en p: {ciudad, pos}, {fila, pos} o null.
+   * - Con el dedo, encima de un rótulo gana su ciudad, salvo justo en el punto
+   *   de otra ciudad que el rótulo tapa (Granada bajo «Sevilla 19°»).
+   * - Si no, cada ciudad saca una nota, su distancia partida por su radio, y
+   *   gana la más baja si no pasa de 1 (el margen de un rótulo cuenta como 1).
+   * - Si no, el municipio más poblado del punto más cercano.
+   * Con el ratón los rótulos están apagados y no cuentan.
+   */
+  function destino(p, escala, raton) {
+    const [conRotulo, sinRotulo] = IMAN[raton ? 'mouse' : 'touch'];
+    // Nunca menos de 8 unidades con rótulo: el punto negro de una ciudad cae
+    // entre cuatro puntos de color, a 5-7 unidades, y solo uno es la ciudad.
+    const grande = Math.max(8, conRotulo / escala);
+    const chico = Math.max(5, sinRotulo / escala);
+    const margen = Math.max(2, MARGEN_ROTULO / escala);
+    const vale = (c) => M.ciudades[c] && D.ciudades[c];
+    const dist = (c) => Math.hypot(M.ciudades[c][0] - p.x, M.ciudades[c][1] - p.y);
+    const rotulos = new Map();                          // ciudad → [caja, distancia a la caja]
     for (const t of capaTexto.querySelectorAll('text')) {
-      const b = t.getBBox();
-      if (p.x >= b.x - 2 && p.x <= b.x + b.width + 2 && p.y >= b.y - 2 && p.y <= b.y + b.height + 2) {
-        const c = t.getAttribute('data-ciudad');        // vacío: el rótulo del lugar que ya se ve
-        if (c && D.ciudades[c]) elegir({ nombre: c, ciudad: c });
-        return;
+      const c = t.getAttribute('data-ciudad');          // vacío: el del lugar que se ve, que no tapa
+      if (c && vale(c)) { const b = t.getBBox(); rotulos.set(c, [b, aCaja(p, b)]); }
+    }
+    if (!raton) {
+      let encima = null;
+      for (const [c, [, d]] of rotulos) if (d <= 2 && (!encima || d < rotulos.get(encima)[1])) encima = c;
+      if (encima) {
+        const [b] = rotulos.get(encima);
+        let ciudad = encima, nota = 1;
+        for (const c of Object.keys(M.ciudades)) {
+          if (c === encima || !vale(c) || aCaja({ x: M.ciudades[c][0], y: M.ciudades[c][1] }, b) > 2) continue;
+          const n = dist(c) / 4;                        // pequeño: que el rótulo siga siendo de su ciudad
+          if (n < nota) { ciudad = c; nota = n; }
+        }
+        return { ciudad, pos: M.ciudades[ciudad] };
       }
     }
-    let mejor = -1, dist = 12;                          // entre dos puntos vecinos hay de 8 a 10
+    let ciudad = null, nota = 1.0001;
+    for (const c of Object.keys(M.ciudades)) {
+      if (!vale(c)) continue;
+      const r = rotulos.get(c);
+      let n = dist(c) / (r ? grande : chico);
+      if (r && !raton && r[1] <= margen) n = Math.min(n, 1);
+      if (n < nota) { ciudad = c; nota = n; }
+    }
+    if (ciudad) return { ciudad, pos: M.ciudades[ciudad] };
+    let mejor = -1, cerca = 12;                         // entre dos puntos vecinos hay de 8 a 10
     M.puntos.forEach(([x, y], k) => {
       const d = Math.hypot(x - p.x, y - p.y);
-      if (d < dist) { mejor = k; dist = d; }
+      if (d < cerca) { mejor = k; cerca = d; }
     });
     const fila = mejor >= 0 && M.lugares && M.lugares[mejor];
-    if (fila) elegir(lector(M.campos)(fila));
+    return fila ? { fila, pos: M.puntos[mejor] } : null;
+  }
+
+  /** Apaga los rótulos y marca el destino: un anillo y su nombre (con el dedo, por encima de él). */
+  function apuntar(d, escala = 1, raton = true) {
+    capaApunta.replaceChildren();
+    svg.classList.toggle('apuntando', !!d);
+    if (raton) svg.style.cursor = d ? '' : 'default';
+    if (!d) return;
+    const [x, y] = d.pos;
+    capaApunta.append(el('circle', { cx: x, cy: y, r: Math.max(6, 7 / escala), 'stroke-width': 2 / escala }));
+    const t = el('text', raton
+      ? { x: x + 11 / escala, y: y - 6 / escala }
+      : { x, y: y - 30 / escala, 'text-anchor': 'middle' });
+    t.style.fontSize = `${13 / escala}px`;
+    t.style.strokeWidth = `${3.5 / escala}px`;
+    t.textContent = d.ciudad || lector(M.campos)(d.fila).nombre;
+    capaApunta.append(t);
+    // Que el nombre no se salga del dibujo.
+    const b = t.getBBox();
+    const dx = b.x < 2 ? 2 - b.x : b.x + b.width > M.ancho - 2 ? M.ancho - 2 - b.x - b.width : 0;
+    const dy = b.y < 2 ? 2 - b.y : 0;
+    if (dx || dy) { t.setAttribute('x', +t.getAttribute('x') + dx); t.setAttribute('y', +t.getAttribute('y') + dy); }
+  }
+
+  svg.addEventListener('pointerdown', (e) => {
+    puntero = e.pointerType || 'touch';
+    if (puntero === 'mouse' || !M || !D) return;
+    const { p, escala } = enElDibujo(e);
+    apuntar(destino(p, escala, false), escala, false);
+  });
+  svg.addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'mouse' || !M || !D) return;
+    const { p, escala } = enElDibujo(e);
+    apuntar(destino(p, escala, true), escala, true);
+  });
+  // Con el dedo, si se desliza (la página se mueve) no se elige nada.
+  svg.addEventListener('pointerup', (e) => { if (e.pointerType !== 'mouse') setTimeout(() => apuntar(null, 1, false), 300); });
+  svg.addEventListener('pointercancel', () => apuntar(null, 1, false));
+  svg.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') apuntar(null); });
+  svg.addEventListener('click', (e) => {
+    if (!M || !D) return;
+    const { p, escala } = enElDibujo(e);
+    const d = destino(p, escala, puntero === 'mouse');
+    if (puntero === 'mouse') apuntar(null);
+    if (!d) return;
+    if (d.ciudad) { if (lugar.ciudad !== d.ciudad) elegir({ nombre: d.ciudad, ciudad: d.ciudad }); return; }
+    const m = lector(M.campos)(d.fila);
+    if (m.nombre !== lugar.nombre || m.provincia !== lugar.provincia) elegir(m);
   });
 
   arrancar();
